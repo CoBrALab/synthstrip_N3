@@ -35,7 +35,7 @@ neuroimaging research:
 - ANTs with MINC support enabled https://github.com/ANTsX/ANTs
 - Priors (see below)
 - imagemagick for a static QC image
-- The webp package from google to get animated QC images: https://developers.google.com/speed/webp/download
+- (optionally) img2web from the webp package from google to get animated QC images: https://developers.google.com/speed/webp/download
 
 ## Usage
 
