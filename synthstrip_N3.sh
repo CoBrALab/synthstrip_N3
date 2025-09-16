@@ -615,7 +615,7 @@ fi
 
 if [[ ${_arg_input} == *.nii || ${_arg_input} == *.nii.gz ]]; then
   # Fix sometimes malformed niftis
-  ConvertImage 3 ${input} ${tmpdir}/input.nii.gz
+  ConvertImage 3 ${_arg_input} ${tmpdir}/input.nii.gz
   nii2mnc ${tmpdir}/input.nii.gz ${tmpdir}/input.mnc
   input=${tmpdir}/input.mnc
 else
