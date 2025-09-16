@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# ARG_HELP([iterativeN3 inhomogeneity correction])
+# ARG_HELP([synthstrip_N3 Human T1w Preprocessing])
 # ARG_OPTIONAL_SINGLE([distance],[],[Initial distance for correction],[400])
 # ARG_OPTIONAL_SINGLE([levels],[],[Levels of correction with distance halving],[4])
 # ARG_OPTIONAL_SINGLE([cycles],[],[Cycles of correction at each level],[3])
@@ -54,7 +54,7 @@ _arg_verbose="off"
 _arg_debug="off"
 
 print_help() {
-  printf '%s\n' "iterativeN3 inhomogeneity correction"
+  printf '%s\n' "synthstrip_N3 Human T1w Preprocessing"
   printf 'Usage: %s [-h|--help] [--distance <arg>] [--levels <arg>] [--cycles <arg>] [--iters <arg>] [--lambda <arg>] [--fwhm <arg>] [--stop <arg>] [--isostep <arg>] [--prior-config <arg>] [--lsq6-resample-type <arg>] [-c|--(no-)clobber] [-v|--(no-)verbose] [-d|--(no-)debug] <input> <output>\n' "$0"
   printf '\t%s\n' "<input>: Input MINC or NIFTI file"
   printf '\t%s\n' "<output>: Output MINC or NIFTI File"
@@ -902,7 +902,7 @@ mincresample -clobber -labels -unsigned -byte -tfm_input_sampling \
   -transform ${tmpdir}/transform_to_input.xfm ${tmpdir}/mask_nocsf_resample_filled.mnc \
   $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).mask_nocsf.mnc
 
-mincresample -clobber  -labels -unsigned -byte -tfm_input_sampling \
+mincresample -clobber -labels -unsigned -byte -tfm_input_sampling \
   -transform ${tmpdir}/transform_to_input.xfm ${tmpdir}/classify.mnc \
   $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).classify.mnc
 
@@ -930,8 +930,8 @@ if [[ "${_arg_lsq6_resample_type}" != "none" ]]; then
     ${tmpdir}/mask_withcsf.mnc \
     $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).lsq6.mask_withcsf.mnc
   mincresample -clobber -unsigned -byte -labels \
-  -transform ${tmpdir}/lsq6.xfm -invert_transform \
-  -like $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).lsq6.mnc \
+    -transform ${tmpdir}/lsq6.xfm -invert_transform \
+    -like $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).lsq6.mnc \
     ${tmpdir}/mask_nocsf_resample_filled.mnc \
     $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).lsq6.mask_nocsf.mnc
 
