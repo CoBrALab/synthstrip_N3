@@ -43,7 +43,7 @@ neuroimaging research:
 synthstrip_N3 Human T1w Preprocessing
 Usage: ./synthstrip_N3.sh [-h|--help] [--distance <arg>] [--levels <arg>] [--cycles <arg>] [--iters <arg>] [--lambda <arg>] [--fwhm <arg>] [--stop <arg>] [--isostep <arg>] [--prior-config <arg>] [--lsq6-resample-type <arg>] [-c|--(no-)clobber] [-v|--(no-)verbose] [-d|--(no-)debug] <input> <output>
         <input>: Input MINC or NIFTI file
-        <output>: Output MINC or NIFTI File
+        <output>: Output MINC file, also used as basename for secondary outputs
         -h, --help: Prints help
         --distance: Initial distance for correction (default: '400')
         --levels: Levels of correction with distance halving (default: '4')

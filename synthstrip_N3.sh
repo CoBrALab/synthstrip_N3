@@ -15,7 +15,7 @@
 # ARG_OPTIONAL_BOOLEAN([verbose],[v],[Run commands verbosely],[off])
 # ARG_OPTIONAL_BOOLEAN([debug],[d],[Show all internal commands and logic for debug],[])
 # ARG_POSITIONAL_SINGLE([input],[Input MINC or NIFTI file])
-# ARG_POSITIONAL_SINGLE([output],[Output MINC or NIFTI File])
+# ARG_POSITIONAL_SINGLE([output],[Output MINC file, also used as basename for secondary outputs])
 # ARGBASH_SET_INDENT([  ])
 # ARGBASH_GO()
 # needed because of Argbash --> m4_ignore([
@@ -23,14 +23,18 @@
 # Argbash is a bash code generator used to get arguments parsing right.
 # Argbash is FREE SOFTWARE, see https://argbash.dev for more info
 
-die() {
+
+die()
+{
   local _ret="${2:-1}"
   test "${_PRINT_HELP:-no}" = yes && print_help >&2
   echo "$1" >&2
   exit "${_ret}"
 }
 
-begins_with_short_option() {
+
+begins_with_short_option()
+{
   local first_option all_short_options='hcvd'
   first_option="${1:0:1}"
   test "$all_short_options" = "${all_short_options/$first_option/}" && return 1 || return 0
@@ -53,11 +57,13 @@ _arg_clobber="off"
 _arg_verbose="off"
 _arg_debug="off"
 
-print_help() {
+
+print_help()
+{
   printf '%s\n' "synthstrip_N3 Human T1w Preprocessing"
   printf 'Usage: %s [-h|--help] [--distance <arg>] [--levels <arg>] [--cycles <arg>] [--iters <arg>] [--lambda <arg>] [--fwhm <arg>] [--stop <arg>] [--isostep <arg>] [--prior-config <arg>] [--lsq6-resample-type <arg>] [-c|--(no-)clobber] [-v|--(no-)verbose] [-d|--(no-)debug] <input> <output>\n' "$0"
   printf '\t%s\n' "<input>: Input MINC or NIFTI file"
-  printf '\t%s\n' "<output>: Output MINC or NIFTI File"
+  printf '\t%s\n' "<output>: Output MINC file, also used as basename for secondary outputs"
   printf '\t%s\n' "-h, --help: Prints help"
   printf '\t%s\n' "--distance: Initial distance for correction (default: '400')"
   printf '\t%s\n' "--levels: Levels of correction with distance halving (default: '4')"
@@ -74,155 +80,166 @@ print_help() {
   printf '\t%s\n' "-d, --debug, --no-debug: Show all internal commands and logic for debug (off by default)"
 }
 
-parse_commandline() {
+
+parse_commandline()
+{
   _positionals_count=0
   local _key
-  while test $# -gt 0; do
+  while test $# -gt 0
+  do
     _key="$1"
     case "$_key" in
-    -h | --help)
-      print_help
-      exit 0
-      ;;
-    -h*)
-      print_help
-      exit 0
-      ;;
-    --distance)
-      test $# -lt 2 && die "Missing value for the optional argument '$_key'." 1
-      _arg_distance="$2"
-      shift
-      ;;
-    --distance=*)
-      _arg_distance="${_key##--distance=}"
-      ;;
-    --levels)
-      test $# -lt 2 && die "Missing value for the optional argument '$_key'." 1
-      _arg_levels="$2"
-      shift
-      ;;
-    --levels=*)
-      _arg_levels="${_key##--levels=}"
-      ;;
-    --cycles)
-      test $# -lt 2 && die "Missing value for the optional argument '$_key'." 1
-      _arg_cycles="$2"
-      shift
-      ;;
-    --cycles=*)
-      _arg_cycles="${_key##--cycles=}"
-      ;;
-    --iters)
-      test $# -lt 2 && die "Missing value for the optional argument '$_key'." 1
-      _arg_iters="$2"
-      shift
-      ;;
-    --iters=*)
-      _arg_iters="${_key##--iters=}"
-      ;;
-    --lambda)
-      test $# -lt 2 && die "Missing value for the optional argument '$_key'." 1
-      _arg_lambda="$2"
-      shift
-      ;;
-    --lambda=*)
-      _arg_lambda="${_key##--lambda=}"
-      ;;
-    --fwhm)
-      test $# -lt 2 && die "Missing value for the optional argument '$_key'." 1
-      _arg_fwhm="$2"
-      shift
-      ;;
-    --fwhm=*)
-      _arg_fwhm="${_key##--fwhm=}"
-      ;;
-    --stop)
-      test $# -lt 2 && die "Missing value for the optional argument '$_key'." 1
-      _arg_stop="$2"
-      shift
-      ;;
-    --stop=*)
-      _arg_stop="${_key##--stop=}"
-      ;;
-    --isostep)
-      test $# -lt 2 && die "Missing value for the optional argument '$_key'." 1
-      _arg_isostep="$2"
-      shift
-      ;;
-    --isostep=*)
-      _arg_isostep="${_key##--isostep=}"
-      ;;
-    --prior-config)
-      test $# -lt 2 && die "Missing value for the optional argument '$_key'." 1
-      _arg_prior_config="$2"
-      shift
-      ;;
-    --prior-config=*)
-      _arg_prior_config="${_key##--prior-config=}"
-      ;;
-    --lsq6-resample-type)
-      test $# -lt 2 && die "Missing value for the optional argument '$_key'." 1
-      _arg_lsq6_resample_type="$2"
-      shift
-      ;;
-    --lsq6-resample-type=*)
-      _arg_lsq6_resample_type="${_key##--lsq6-resample-type=}"
-      ;;
-    -c | --no-clobber | --clobber)
-      _arg_clobber="on"
-      test "${1:0:5}" = "--no-" && _arg_clobber="off"
-      ;;
-    -c*)
-      _arg_clobber="on"
-      _next="${_key##-c}"
-      if test -n "$_next" -a "$_next" != "$_key"; then
-        { begins_with_short_option "$_next" && shift && set -- "-c" "-${_next}" "$@"; } || die "The short option '$_key' can't be decomposed to ${_key:0:2} and -${_key:2}, because ${_key:0:2} doesn't accept value and '-${_key:2:1}' doesn't correspond to a short option."
-      fi
-      ;;
-    -v | --no-verbose | --verbose)
-      _arg_verbose="on"
-      test "${1:0:5}" = "--no-" && _arg_verbose="off"
-      ;;
-    -v*)
-      _arg_verbose="on"
-      _next="${_key##-v}"
-      if test -n "$_next" -a "$_next" != "$_key"; then
-        { begins_with_short_option "$_next" && shift && set -- "-v" "-${_next}" "$@"; } || die "The short option '$_key' can't be decomposed to ${_key:0:2} and -${_key:2}, because ${_key:0:2} doesn't accept value and '-${_key:2:1}' doesn't correspond to a short option."
-      fi
-      ;;
-    -d | --no-debug | --debug)
-      _arg_debug="on"
-      test "${1:0:5}" = "--no-" && _arg_debug="off"
-      ;;
-    -d*)
-      _arg_debug="on"
-      _next="${_key##-d}"
-      if test -n "$_next" -a "$_next" != "$_key"; then
-        { begins_with_short_option "$_next" && shift && set -- "-d" "-${_next}" "$@"; } || die "The short option '$_key' can't be decomposed to ${_key:0:2} and -${_key:2}, because ${_key:0:2} doesn't accept value and '-${_key:2:1}' doesn't correspond to a short option."
-      fi
-      ;;
-    *)
-      _last_positional="$1"
-      _positionals+=("$_last_positional")
-      _positionals_count=$((_positionals_count + 1))
-      ;;
+      -h|--help)
+        print_help
+        exit 0
+        ;;
+      -h*)
+        print_help
+        exit 0
+        ;;
+      --distance)
+        test $# -lt 2 && die "Missing value for the optional argument '$_key'." 1
+        _arg_distance="$2"
+        shift
+        ;;
+      --distance=*)
+        _arg_distance="${_key##--distance=}"
+        ;;
+      --levels)
+        test $# -lt 2 && die "Missing value for the optional argument '$_key'." 1
+        _arg_levels="$2"
+        shift
+        ;;
+      --levels=*)
+        _arg_levels="${_key##--levels=}"
+        ;;
+      --cycles)
+        test $# -lt 2 && die "Missing value for the optional argument '$_key'." 1
+        _arg_cycles="$2"
+        shift
+        ;;
+      --cycles=*)
+        _arg_cycles="${_key##--cycles=}"
+        ;;
+      --iters)
+        test $# -lt 2 && die "Missing value for the optional argument '$_key'." 1
+        _arg_iters="$2"
+        shift
+        ;;
+      --iters=*)
+        _arg_iters="${_key##--iters=}"
+        ;;
+      --lambda)
+        test $# -lt 2 && die "Missing value for the optional argument '$_key'." 1
+        _arg_lambda="$2"
+        shift
+        ;;
+      --lambda=*)
+        _arg_lambda="${_key##--lambda=}"
+        ;;
+      --fwhm)
+        test $# -lt 2 && die "Missing value for the optional argument '$_key'." 1
+        _arg_fwhm="$2"
+        shift
+        ;;
+      --fwhm=*)
+        _arg_fwhm="${_key##--fwhm=}"
+        ;;
+      --stop)
+        test $# -lt 2 && die "Missing value for the optional argument '$_key'." 1
+        _arg_stop="$2"
+        shift
+        ;;
+      --stop=*)
+        _arg_stop="${_key##--stop=}"
+        ;;
+      --isostep)
+        test $# -lt 2 && die "Missing value for the optional argument '$_key'." 1
+        _arg_isostep="$2"
+        shift
+        ;;
+      --isostep=*)
+        _arg_isostep="${_key##--isostep=}"
+        ;;
+      --prior-config)
+        test $# -lt 2 && die "Missing value for the optional argument '$_key'." 1
+        _arg_prior_config="$2"
+        shift
+        ;;
+      --prior-config=*)
+        _arg_prior_config="${_key##--prior-config=}"
+        ;;
+      --lsq6-resample-type)
+        test $# -lt 2 && die "Missing value for the optional argument '$_key'." 1
+        _arg_lsq6_resample_type="$2"
+        shift
+        ;;
+      --lsq6-resample-type=*)
+        _arg_lsq6_resample_type="${_key##--lsq6-resample-type=}"
+        ;;
+      -c|--no-clobber|--clobber)
+        _arg_clobber="on"
+        test "${1:0:5}" = "--no-" && _arg_clobber="off"
+        ;;
+      -c*)
+        _arg_clobber="on"
+        _next="${_key##-c}"
+        if test -n "$_next" -a "$_next" != "$_key"
+        then
+          { begins_with_short_option "$_next" && shift && set -- "-c" "-${_next}" "$@"; } || die "The short option '$_key' can't be decomposed to ${_key:0:2} and -${_key:2}, because ${_key:0:2} doesn't accept value and '-${_key:2:1}' doesn't correspond to a short option."
+        fi
+        ;;
+      -v|--no-verbose|--verbose)
+        _arg_verbose="on"
+        test "${1:0:5}" = "--no-" && _arg_verbose="off"
+        ;;
+      -v*)
+        _arg_verbose="on"
+        _next="${_key##-v}"
+        if test -n "$_next" -a "$_next" != "$_key"
+        then
+          { begins_with_short_option "$_next" && shift && set -- "-v" "-${_next}" "$@"; } || die "The short option '$_key' can't be decomposed to ${_key:0:2} and -${_key:2}, because ${_key:0:2} doesn't accept value and '-${_key:2:1}' doesn't correspond to a short option."
+        fi
+        ;;
+      -d|--no-debug|--debug)
+        _arg_debug="on"
+        test "${1:0:5}" = "--no-" && _arg_debug="off"
+        ;;
+      -d*)
+        _arg_debug="on"
+        _next="${_key##-d}"
+        if test -n "$_next" -a "$_next" != "$_key"
+        then
+          { begins_with_short_option "$_next" && shift && set -- "-d" "-${_next}" "$@"; } || die "The short option '$_key' can't be decomposed to ${_key:0:2} and -${_key:2}, because ${_key:0:2} doesn't accept value and '-${_key:2:1}' doesn't correspond to a short option."
+        fi
+        ;;
+      *)
+        _last_positional="$1"
+        _positionals+=("$_last_positional")
+        _positionals_count=$((_positionals_count + 1))
+        ;;
     esac
     shift
   done
 }
 
-handle_passed_args_count() {
+
+handle_passed_args_count()
+{
   local _required_args_string="'input' and 'output'"
   test "${_positionals_count}" -ge 2 || _PRINT_HELP=yes die "FATAL ERROR: Not enough positional arguments - we require exactly 2 (namely: $_required_args_string), but got only ${_positionals_count}." 1
   test "${_positionals_count}" -le 2 || _PRINT_HELP=yes die "FATAL ERROR: There were spurious positional arguments --- we expect exactly 2 (namely: $_required_args_string), but got ${_positionals_count} (the last one was: '${_last_positional}')." 1
 }
 
-assign_positional_args() {
+
+assign_positional_args()
+{
   local _positional_name _shift_for=$1
   _positional_names="_arg_input _arg_output "
 
   shift "$_shift_for"
-  for _positional_name in ${_positional_names}; do
+  for _positional_name in ${_positional_names}
+  do
     test $# -gt 0 || break
     eval "$_positional_name=\${1}" || die "Error during argument parsing, possibly an Argbash bug." 1
     shift
