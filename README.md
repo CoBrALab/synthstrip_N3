@@ -60,6 +60,25 @@ Usage: ./synthstrip_N3.sh [-h|--help] [--distance <arg>] [--levels <arg>] [--cyc
         -d, --debug, --no-debug: Show all internal commands and logic for debug (off by default)
 ```
 
+## Outputs
+
+Given an output basename `example.mnc` the following outputs are created:
+
+```
+ example.classify.mnc
+ example.denoise.mnc
+ example.mnc
+ example.qc.bias.jpg
+ example.qc.mask.classified.jpg
+ example.qc.registration.jpg
+ example.qc.webp
+ example.affine_to_model.xfm
+ example.mask_nocsf.mnc
+ example.mask_withcsf.mnc
+ example.nlin_from_model.xfm
+ example.nlin_to_model.xfm
+```
+
 ## Getting Priors
 
 This pipeline uses the priors available from the MNI at http://nist.mni.mcgill.ca/?page_id=714. The "ANTs" style priors
