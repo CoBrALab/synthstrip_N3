@@ -30,6 +30,7 @@ neuroimaging research:
 ## Dependencies
 
 - minc-toolkit-v2 https://bic-mni.github.io/
+- synthstrip from https://surfer.nmr.mgh.harvard.edu/docs/synthstrip/
 - `antsRegistration_affine_SyN.sh` from https://github.com/CoBrALab/minc-toolkit-extras
 - ANTs with MINC support enabled https://github.com/ANTsX/ANTs
 - Priors (see below)
