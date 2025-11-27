@@ -344,7 +344,18 @@ function debug() {
   true
 }
 
-tmpdir=$(mktemp -d)
+function extension_strip() {
+  sed -r 's/(.nii$|.nii.gz|.nrrd|.mnc|.mnc.gz)$//'
+}
+
+# Create tmpdir in the form $TMPDIR/tmp.$SCRIPTNAME.$INPUTFILE
+# Later functions extend to $TMPDIR/tmp.$SCRIPTNAME.$INPUTFILE/$FUNCTION 
+
+input_base=$(basename "$_arg_input" | extension_strip)
+
+tmpdir=$(mktemp -d --tmpdir "tmp.${__base}_${input_base}_XXXXXX")
+export TMPDIR="${tmpdir}"
+
 # Setup exit trap for cleanup, don't do if debug
 function finish() {
   if [[ ${_arg_debug} == "off" ]]; then
@@ -500,8 +511,8 @@ function make_qc() {
 lsq12_to_lsq6() {
   local input=$1
   local output=$2
-
-  local tmpdir=$(mktemp -d)
+  local tmpdir
+  tmpdir=$(mktemp -d --tmpdir "${FUNCNAME[0]}_XXXXXX")
 
   param2xfm $(xfm2param ${input} | grep -E 'scale|shear') ${tmpdir}/scaleshear.xfm
   xfminvert ${tmpdir}/scaleshear.xfm ${tmpdir}/unscaleshear.xfm
@@ -521,7 +532,8 @@ hierarchical_N3() {
   local iters=${7}
   local output=${8}
   local field_output=${9}
-  local tmpdir=$(mktemp -d)
+  local tmpdir
+  tmpdir=$(mktemp -d --tmpdir "${FUNCNAME[0]}_${starting_distance}_XXXXXX")
 
   cp ${input} ${tmpdir}/input.mnc
   input=${tmpdir}/input.mnc
