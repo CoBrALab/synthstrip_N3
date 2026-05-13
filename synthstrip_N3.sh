@@ -919,6 +919,8 @@ mincresample -clobber -labels -unsigned -byte -tfm_input_sampling \
   -transform ${tmpdir}/transform_to_input.xfm ${tmpdir}/classify.mnc \
   "$(bids_suffix "_dseg")"
 
+# TODO: BEP 014 (spatial transforms) may stabilize with _mode-image_xfm suffix;
+# revisit naming when the spec is finalized.
 cp -f ${tmpdir}/to_model_0_GenericAffine.xfm "$(bids_suffix "_from-T1w_to-model_desc-affine" xfm)"
 
 cp -f ${tmpdir}/to_model_1_NL_grid_0.mnc "$(bids_suffix "_from-T1w_to-model_desc-nonlinear_grid0")"
