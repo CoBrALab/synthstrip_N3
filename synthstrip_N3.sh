@@ -596,7 +596,9 @@ if [[ "${_arg_clobber}" == "off" ]]; then
     $(bids_suffix "_desc-denoised_T1w") \
     $(bids_suffix "_from-T1w_to-model_desc-affine" xfm) \
     $(bids_suffix "_from-T1w_to-model_desc-nonlinear" xfm) \
+    $(bids_suffix "_from-T1w_to-model_desc-nonlinear_grid0") \
     $(bids_suffix "_from-model_to-T1w_desc-nonlinear" xfm) \
+    $(bids_suffix "_from-model_to-T1w_desc-nonlinear_grid0") \
     $(bids_suffix "_qc" webp) \
     $(bids_suffix "_desc-maskClassified_qc" jpg) \
     $(bids_suffix "_desc-biasCorrection_qc" jpg) \
@@ -917,8 +919,14 @@ mincresample -clobber -labels -unsigned -byte -tfm_input_sampling \
   $(bids_suffix "_dseg")
 
 cp -f ${tmpdir}/to_model_0_GenericAffine.xfm "$(bids_suffix "_from-T1w_to-model_desc-affine" xfm)"
-cp -f ${tmpdir}/to_model_1_NL.xfm "$(bids_suffix "_from-T1w_to-model_desc-nonlinear" xfm)"
-cp -f ${tmpdir}/to_model_1_inverse_NL.xfm "$(bids_suffix "_from-model_to-T1w_desc-nonlinear" xfm)"
+
+cp -f ${tmpdir}/to_model_1_NL_grid_0.mnc "$(bids_suffix "_from-T1w_to-model_desc-nonlinear_grid0")"
+sed "s|$(basename ${tmpdir}/to_model_1_NL_grid_0.mnc)|$(basename "$(bids_suffix "_from-T1w_to-model_desc-nonlinear_grid0")")|g" \
+  ${tmpdir}/to_model_1_NL.xfm > "$(bids_suffix "_from-T1w_to-model_desc-nonlinear" xfm)"
+
+cp -f ${tmpdir}/to_model_1_inverse_NL_grid_0.mnc "$(bids_suffix "_from-model_to-T1w_desc-nonlinear_grid0")"
+sed "s|$(basename ${tmpdir}/to_model_1_inverse_NL_grid_0.mnc)|$(basename "$(bids_suffix "_from-model_to-T1w_desc-nonlinear_grid0")")|g" \
+  ${tmpdir}/to_model_1_inverse_NL.xfm > "$(bids_suffix "_from-model_to-T1w_desc-nonlinear" xfm)"
 
 if [[ "${_arg_lsq6_resample_type}" != "none" ]]; then
   # Create LSQ6 version of affine transform
