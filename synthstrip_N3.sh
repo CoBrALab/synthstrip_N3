@@ -606,11 +606,12 @@ if [[ "${_arg_clobber}" == "off" ]]; then
     $(bids_suffix "_space-LSQ6_label-brainnocsf_dseg") \
     $(bids_suffix "_space-LSQ6_label-brainwithcsf_dseg") \
     $(bids_suffix "_space-LSQ6_dseg") \
-    $(bids_suffix "_space-LSQ6_T1w"); do
+    $(bids_suffix "_space-LSQ6_T1w") \
+    $(bids_suffix "_from-T1w_to-LSQ6_desc-rigid" xfm); do
     if [[ -s "${file}" ]]; then
       failure "File ${file} already exists and --clobber not specified!"
     fi
-done
+  done
 fi
 RESAMPLEMODEL="${QUARANTINE_PATH}/resources/mni_icbm152_nlin_sym_09c_minc2/mni_icbm152_t1_tal_nlin_sym_09c.mnc"
 RESAMPLEMASK="${QUARANTINE_PATH}/resources/mni_icbm152_nlin_sym_09c_minc2/mni_icbm152_t1_tal_nlin_sym_09c_mask.mnc"
@@ -941,7 +942,7 @@ if [[ "${_arg_lsq6_resample_type}" != "none" ]]; then
       $(bids_suffix "_space-LSQ6_T1w")
   fi
 
-  cp -f ${tmpdir}/lsq6.xfm $(bids_suffix "_space-LSQ6" xfm)
+  cp -f ${tmpdir}/lsq6.xfm "$(bids_suffix "_from-T1w_to-LSQ6_desc-rigid" xfm)"
   mincresample -clobber -unsigned -byte -labels \
     -transform ${tmpdir}/lsq6.xfm -invert_transform \
     -like $(bids_suffix "_space-LSQ6_T1w") \
