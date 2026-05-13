@@ -346,15 +346,16 @@ function debug() {
 
 # Helper function to add BIDS-compliant suffix to basename
 function bids_suffix() {
-  local base=$(dirname ${_arg_output})/$(basename ${_arg_output} .mnc)
-  local suffix=$1
-  local ext=${2:-mnc}
+  local base
+  base="$(dirname "${_arg_output}")/$(basename "${_arg_output}" .mnc)"
+  local suffix="$1"
+  local ext="${2:-mnc}"
   echo "${base}${suffix}.${ext}"
 }
+
 function extension_strip() {
   sed -r 's/(.nii$|.nii.gz|.nrrd|.mnc|.mnc.gz)$//'
 }
-# Create tmpdir in the form $TMPDIR/tmp.$SCRIPTNAME.$INPUTFILE
 # Create tmpdir in the form $TMPDIR/tmp.$SCRIPTNAME.$INPUTFILE
 # Later functions extend to $TMPDIR/tmp.$SCRIPTNAME.$INPUTFILE/$FUNCTION 
 
