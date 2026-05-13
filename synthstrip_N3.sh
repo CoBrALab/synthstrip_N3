@@ -590,8 +590,8 @@ hierarchical_N3() {
 # Output checking
 if [[ "${_arg_clobber}" == "off" ]]; then
   for file in ${_arg_output} \
-    $(bids_suffix "_label-brainnocsf_dseg") \
-    $(bids_suffix "_label-brainwithcsf_dseg") \
+    $(bids_suffix "_label-brainnocsf_mask") \
+    $(bids_suffix "_label-brainwithcsf_mask") \
     $(bids_suffix "_dseg") \
     $(bids_suffix "_desc-denoised_T1w") \
     $(bids_suffix "_from-T1w_to-model_desc-affine" xfm) \
@@ -603,8 +603,8 @@ if [[ "${_arg_clobber}" == "off" ]]; then
     $(bids_suffix "_desc-maskClassified_qc" jpg) \
     $(bids_suffix "_desc-biasCorrection_qc" jpg) \
     $(bids_suffix "_desc-registration_qc" jpg) \
-    $(bids_suffix "_space-LSQ6_label-brainnocsf_dseg") \
-    $(bids_suffix "_space-LSQ6_label-brainwithcsf_dseg") \
+    $(bids_suffix "_space-LSQ6_label-brainnocsf_mask") \
+    $(bids_suffix "_space-LSQ6_label-brainwithcsf_mask") \
     $(bids_suffix "_space-LSQ6_dseg") \
     $(bids_suffix "_space-LSQ6_T1w") \
     $(bids_suffix "_from-T1w_to-LSQ6_desc-rigid" xfm); do
@@ -909,11 +909,11 @@ mincresample -clobber -unsigned -short -tfm_input_sampling \
 
 mincresample -clobber -labels -unsigned -byte -tfm_input_sampling \
   -transform ${tmpdir}/transform_to_input.xfm ${tmpdir}/mask_withcsf.mnc \
-  "$(bids_suffix "_label-brainwithcsf_dseg")"
+  "$(bids_suffix "_label-brainwithcsf_mask")"
 
 mincresample -clobber -labels -unsigned -byte -tfm_input_sampling \
   -transform ${tmpdir}/transform_to_input.xfm ${tmpdir}/mask_nocsf_resample_filled.mnc \
-  "$(bids_suffix "_label-brainnocsf_dseg")"
+  "$(bids_suffix "_label-brainnocsf_mask")"
 
 mincresample -clobber -labels -unsigned -byte -tfm_input_sampling \
   -transform ${tmpdir}/transform_to_input.xfm ${tmpdir}/classify.mnc \
@@ -947,12 +947,12 @@ if [[ "${_arg_lsq6_resample_type}" != "none" ]]; then
     -transform ${tmpdir}/lsq6.xfm -invert_transform \
     -like "$(bids_suffix "_space-LSQ6_T1w")" \
     ${tmpdir}/mask_withcsf.mnc \
-    "$(bids_suffix "_space-LSQ6_label-brainwithcsf_dseg")"
+    "$(bids_suffix "_space-LSQ6_label-brainwithcsf_mask")"
   mincresample -clobber -unsigned -byte -labels \
     -transform ${tmpdir}/lsq6.xfm -invert_transform \
     -like "$(bids_suffix "_space-LSQ6_T1w")" \
     ${tmpdir}/mask_nocsf_resample_filled.mnc \
-    "$(bids_suffix "_space-LSQ6_label-brainnocsf_dseg")"
+    "$(bids_suffix "_space-LSQ6_label-brainnocsf_mask")"
 
   mincresample -clobber -transform ${tmpdir}/lsq6.xfm -invert_transform -like "$(bids_suffix "_space-LSQ6_T1w")" \
     -keep -near -unsigned -byte -labels ${tmpdir}/classify.mnc "$(bids_suffix "_space-LSQ6_dseg")"
