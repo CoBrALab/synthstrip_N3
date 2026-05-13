@@ -905,19 +905,19 @@ mincresample -clobber -unsigned -short -tfm_input_sampling \
   ${_arg_output}
 mincresample -clobber -unsigned -short -tfm_input_sampling \
   -transform ${tmpdir}/transform_to_input.xfm ${tmpdir}/corrected_denoise_scaled.mnc \
-  $(bids_suffix "_desc-denoised_T1w")
+  "$(bids_suffix "_desc-denoised_T1w")"
 
 mincresample -clobber -labels -unsigned -byte -tfm_input_sampling \
   -transform ${tmpdir}/transform_to_input.xfm ${tmpdir}/mask_withcsf.mnc \
-  $(bids_suffix "_label-brainwithcsf_dseg")
+  "$(bids_suffix "_label-brainwithcsf_dseg")"
 
 mincresample -clobber -labels -unsigned -byte -tfm_input_sampling \
   -transform ${tmpdir}/transform_to_input.xfm ${tmpdir}/mask_nocsf_resample_filled.mnc \
-  $(bids_suffix "_label-brainnocsf_dseg")
+  "$(bids_suffix "_label-brainnocsf_dseg")"
 
 mincresample -clobber -labels -unsigned -byte -tfm_input_sampling \
   -transform ${tmpdir}/transform_to_input.xfm ${tmpdir}/classify.mnc \
-  $(bids_suffix "_dseg")
+  "$(bids_suffix "_dseg")"
 
 cp -f ${tmpdir}/to_model_0_GenericAffine.xfm "$(bids_suffix "_from-T1w_to-model_desc-affine" xfm)"
 
@@ -935,27 +935,27 @@ if [[ "${_arg_lsq6_resample_type}" != "none" ]]; then
 
   if [[ ${_arg_lsq6_resample_type} == "coordinates" ]]; then
     mincresample -clobber -unsigned -short -tfm_input_sampling -transform ${tmpdir}/lsq6.xfm -invert_transform ${tmpdir}/corrected_scaled.mnc \
-      $(bids_suffix "_space-LSQ6_T1w")
+      "$(bids_suffix "_space-LSQ6_T1w")"
   else
     ResampleImage 3 ${RESAMPLEMODEL} ${tmpdir}/resamplemodel.mnc ${_arg_lsq6_resample_type}x${_arg_lsq6_resample_type}x${_arg_lsq6_resample_type} 0
     mincresample -clobber -unsigned -short -like ${tmpdir}/resamplemodel.mnc -transform ${tmpdir}/lsq6.xfm -invert_transform ${tmpdir}/corrected_scaled.mnc \
-      $(bids_suffix "_space-LSQ6_T1w")
+      "$(bids_suffix "_space-LSQ6_T1w")"
   fi
 
   cp -f ${tmpdir}/lsq6.xfm "$(bids_suffix "_from-T1w_to-LSQ6_desc-rigid" xfm)"
   mincresample -clobber -unsigned -byte -labels \
     -transform ${tmpdir}/lsq6.xfm -invert_transform \
-    -like $(bids_suffix "_space-LSQ6_T1w") \
+    -like "$(bids_suffix "_space-LSQ6_T1w")" \
     ${tmpdir}/mask_withcsf.mnc \
-    $(bids_suffix "_space-LSQ6_label-brainwithcsf_dseg")
+    "$(bids_suffix "_space-LSQ6_label-brainwithcsf_dseg")"
   mincresample -clobber -unsigned -byte -labels \
     -transform ${tmpdir}/lsq6.xfm -invert_transform \
-    -like $(bids_suffix "_space-LSQ6_T1w") \
+    -like "$(bids_suffix "_space-LSQ6_T1w")" \
     ${tmpdir}/mask_nocsf_resample_filled.mnc \
-    $(bids_suffix "_space-LSQ6_label-brainnocsf_dseg")
+    "$(bids_suffix "_space-LSQ6_label-brainnocsf_dseg")"
 
-  mincresample -clobber -transform ${tmpdir}/lsq6.xfm -invert_transform -like $(bids_suffix "_space-LSQ6_T1w") \
-    -keep -near -unsigned -byte -labels ${tmpdir}/classify.mnc $(bids_suffix "_space-LSQ6_dseg")
+  mincresample -clobber -transform ${tmpdir}/lsq6.xfm -invert_transform -like "$(bids_suffix "_space-LSQ6_T1w")" \
+    -keep -near -unsigned -byte -labels ${tmpdir}/classify.mnc "$(bids_suffix "_space-LSQ6_dseg")"
 fi
 
 # ] <-- needed because of Argbash
