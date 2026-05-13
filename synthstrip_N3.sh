@@ -589,25 +589,34 @@ hierarchical_N3() {
 
 # Output checking
 if [[ "${_arg_clobber}" == "off" ]]; then
-  for file in ${_arg_output} \
-    $(bids_suffix "_label-brainnocsf_mask") \
-    $(bids_suffix "_label-brainwithcsf_mask") \
-    $(bids_suffix "_dseg") \
-    $(bids_suffix "_desc-denoised_T1w") \
-    $(bids_suffix "_from-T1w_to-model_desc-affine" xfm) \
-    $(bids_suffix "_from-T1w_to-model_desc-nonlinear" xfm) \
-    $(bids_suffix "_from-T1w_to-model_desc-nonlinear_grid0") \
-    $(bids_suffix "_from-model_to-T1w_desc-nonlinear" xfm) \
-    $(bids_suffix "_from-model_to-T1w_desc-nonlinear_grid0") \
-    $(bids_suffix "_qc" webp) \
-    $(bids_suffix "_desc-maskClassified_qc" jpg) \
-    $(bids_suffix "_desc-biasCorrection_qc" jpg) \
-    $(bids_suffix "_desc-registration_qc" jpg) \
-    $(bids_suffix "_space-LSQ6_label-brainnocsf_mask") \
-    $(bids_suffix "_space-LSQ6_label-brainwithcsf_mask") \
-    $(bids_suffix "_space-LSQ6_dseg") \
-    $(bids_suffix "_space-LSQ6_T1w") \
-    $(bids_suffix "_from-T1w_to-LSQ6_desc-rigid" xfm); do
+  _clobber_files=(
+    "${_arg_output}"
+    "$(bids_suffix "_label-brainnocsf_mask")"
+    "$(bids_suffix "_label-brainwithcsf_mask")"
+    "$(bids_suffix "_dseg")"
+    "$(bids_suffix "_desc-denoised_T1w")"
+    "$(bids_suffix "_from-T1w_to-model_desc-affine" xfm)"
+    "$(bids_suffix "_from-T1w_to-model_desc-nonlinear" xfm)"
+    "$(bids_suffix "_from-T1w_to-model_desc-nonlinear_grid0")"
+    "$(bids_suffix "_from-model_to-T1w_desc-nonlinear" xfm)"
+    "$(bids_suffix "_from-model_to-T1w_desc-nonlinear_grid0")"
+    "$(bids_suffix "_desc-maskClassified_qc" jpg)"
+    "$(bids_suffix "_desc-biasCorrection_qc" jpg)"
+    "$(bids_suffix "_desc-registration_qc" jpg)"
+  )
+  if command -v img2webp &>/dev/null; then
+    _clobber_files+=("$(bids_suffix "_qc" webp)")
+  fi
+  if [[ "${_arg_lsq6_resample_type}" != "none" ]]; then
+    _clobber_files+=(
+      "$(bids_suffix "_space-LSQ6_label-brainnocsf_mask")"
+      "$(bids_suffix "_space-LSQ6_label-brainwithcsf_mask")"
+      "$(bids_suffix "_space-LSQ6_dseg")"
+      "$(bids_suffix "_space-LSQ6_T1w")"
+      "$(bids_suffix "_from-T1w_to-LSQ6_desc-rigid" xfm)"
+    )
+  fi
+  for file in "${_clobber_files[@]}"; do
     if [[ -s "${file}" ]]; then
       failure "File ${file} already exists and --clobber not specified!"
     fi
