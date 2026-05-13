@@ -484,7 +484,7 @@ function make_qc() {
     ${tmpdir}/qc/s_corrected_spect.rgb \
     ${tmpdir}/qc/t_orig_spect.rgb \
     ${tmpdir}/qc/t_corrected_spect.rgb \
-    $(bids_suffix "_desc-bias_correction_qc" jpg)
+    "$(bids_suffix "_desc-biasCorrection_qc" jpg)"
 
   convert -background black -strip -append \
     -interlace Plane -sampling-factor 4:2:0 -quality "85%" \
@@ -494,7 +494,7 @@ function make_qc() {
     ${tmpdir}/qc/s_classified.rgb \
     ${tmpdir}/qc/t_mask.rgb \
     ${tmpdir}/qc/t_classified.rgb \
-    $(bids_suffix "_desc-mask-classified_qc" jpg)
+    "$(bids_suffix "_desc-maskClassified_qc" jpg)"
 
   convert -background black -strip -append \
     -interlace Plane -sampling-factor 4:2:0 -quality "85%" \
@@ -504,15 +504,15 @@ function make_qc() {
     ${tmpdir}/qc/s_nlin_outline.rgb \
     ${tmpdir}/qc/t_outline.rgb \
     ${tmpdir}/qc/t_nlin_outline.rgb \
-    $(bids_suffix "_desc-registration_qc" jpg)
+    "$(bids_suffix "_desc-registration_qc" jpg)"
 
   # If webp software is available animate a before/after image
   if command -v img2webp; then
     img2webp -d 1000 -lossy -min_size \
-      $(bids_suffix "_desc-bias_correction_qc" jpg) \
-      $(bids_suffix "_desc-mask-classified_qc" jpg) \
-      $(bids_suffix "_desc-registration_qc" jpg) \
-      -o $(bids_suffix "_desc-qc" webp) || true
+      "$(bids_suffix "_desc-biasCorrection_qc" jpg)" \
+      "$(bids_suffix "_desc-maskClassified_qc" jpg)" \
+      "$(bids_suffix "_desc-registration_qc" jpg)" \
+      -o "$(bids_suffix "_qc" webp)" || true
   fi
 }
 
@@ -597,9 +597,9 @@ if [[ "${_arg_clobber}" == "off" ]]; then
     $(bids_suffix "_from-model_to-affine" xfm) \
     $(bids_suffix "_from-model_to-nlin" xfm) \
     $(bids_suffix "_from-model_to-nlin_inverse" xfm) \
-    $(bids_suffix "_desc-qc" webp) \
-    $(bids_suffix "_desc-mask-classified_qc" jpg) \
-    $(bids_suffix "_desc-bias_correction_qc" jpg) \
+    $(bids_suffix "_qc" webp) \
+    $(bids_suffix "_desc-maskClassified_qc" jpg) \
+    $(bids_suffix "_desc-biasCorrection_qc" jpg) \
     $(bids_suffix "_desc-registration_qc" jpg) \
     $(bids_suffix "_space-LSQ6_label-brainnocsf_dseg") \
     $(bids_suffix "_space-LSQ6_label-brainwithcsf_dseg") \
