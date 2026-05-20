@@ -347,7 +347,7 @@ function debug() {
 # Helper function to add BIDS-compliant suffix to basename
 function bids_suffix() {
   local base
-  base="$(dirname "${_arg_output}")/$(basename "${_arg_output}" | extension_strip)"
+  base="$(dirname "${_arg_output}")/$(basename "${_arg_output}" | extension_strip | sed 's/_[Tt]1[Ww]$//')"
   local suffix="$1"
   local ext="${2:-mnc}"
   echo "${base}${suffix}.${ext}"
