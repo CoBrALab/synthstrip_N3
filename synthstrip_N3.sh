@@ -507,7 +507,7 @@ function make_qc() {
     "$(bids_suffix "_desc-registration_qc" jpg)"
 
   # If webp software is available animate a before/after image
-  if command -v img2webp; then
+  if command -v img2webp &>/dev/null; then
     img2webp -d 1000 -lossy -min_size \
       "$(bids_suffix "_desc-biasCorrection_qc" jpg)" \
       "$(bids_suffix "_desc-maskClassified_qc" jpg)" \
