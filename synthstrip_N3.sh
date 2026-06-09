@@ -594,6 +594,7 @@ if [[ "${_arg_clobber}" == "off" ]]; then
     "$(bids_suffix "_label-brainnocsf_mask")"
     "$(bids_suffix "_label-brainwithcsf_mask")"
     "$(bids_suffix "_dseg")"
+    "$(bids_suffix "_dseg" tsv)"
     "$(bids_suffix "_desc-denoised_T1w")"
     "$(bids_suffix "_from-T1w_to-model_desc-affine" xfm)"
     "$(bids_suffix "_from-T1w_to-model_desc-nonlinear" xfm)"
@@ -927,6 +928,16 @@ mincresample -clobber -labels -unsigned -byte -tfm_input_sampling \
 mincresample -clobber -labels -unsigned -byte -tfm_input_sampling \
   -transform ${tmpdir}/transform_to_input.xfm ${tmpdir}/classify.mnc \
   "$(bids_suffix "_dseg")"
+
+# Label lookup table for the discrete segmentation (BIDS _dseg.tsv).
+# index = pipeline label (Atropos prior order); mapping = BIDS standard index.
+{
+  printf 'index\tname\tabbreviation\tmapping\n'
+  printf '1\tCerebrospinal Fluid\tCSF\t3\n'
+  printf '2\tGray Matter\tGM\t1\n'
+  printf '3\tWhite Matter\tWM\t2\n'
+  [[ -n ${DEEPGMPRIOR:-} ]] && printf '4\tSubcortical Gray Matter\tSGM\t9\n'
+} > "$(bids_suffix "_dseg" tsv)"
 
 # TODO: BEP 014 (spatial transforms) may stabilize with _mode-image_xfm suffix;
 # revisit naming when the spec is finalized.
