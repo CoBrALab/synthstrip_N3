@@ -587,10 +587,9 @@ hierarchical_N3() {
   rm -rf ${tmpdir}
 }
 
-# Normalize the main output to .mnc; the pipeline writes MINC regardless of the
-# extension given, so strip any input-style extension to avoid mislabeled files
-# (e.g. a MINC file named example.nii.gz). The _T1w suffix is preserved here.
-_arg_output="$(dirname "${_arg_output}")/$(basename "${_arg_output}" | extension_strip).mnc"
+if [[ "$(basename "${_arg_output}")" == *.* && "${_arg_output}" != *.mnc ]]; then
+  failure "Output '${_arg_output}' must be a .mnc file or an extensionless name"
+fi
 
 # Output checking
 if [[ "${_arg_clobber}" == "off" ]]; then
