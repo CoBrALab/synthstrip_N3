@@ -344,10 +344,18 @@ function debug() {
   true
 }
 
+# Helper function to add BIDS-compliant suffix to basename
+function bids_suffix() {
+  local base
+  base="$(dirname "${_arg_output}")/$(basename "${_arg_output}" | extension_strip | sed 's/_[Tt]1[Ww]$//')"
+  local suffix="$1"
+  local ext="${2:-mnc}"
+  echo "${base}${suffix}.${ext}"
+}
+
 function extension_strip() {
   sed -r 's/(.nii$|.nii.gz|.nrrd|.mnc|.mnc.gz)$//'
 }
-
 # Create tmpdir in the form $TMPDIR/tmp.$SCRIPTNAME.$INPUTFILE
 # Later functions extend to $TMPDIR/tmp.$SCRIPTNAME.$INPUTFILE/$FUNCTION 
 
@@ -476,7 +484,7 @@ function make_qc() {
     ${tmpdir}/qc/s_corrected_spect.rgb \
     ${tmpdir}/qc/t_orig_spect.rgb \
     ${tmpdir}/qc/t_corrected_spect.rgb \
-    $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).qc.bias.jpg
+    "$(bids_suffix "_desc-biasCorrection_qc" jpg)"
 
   convert -background black -strip -append \
     -interlace Plane -sampling-factor 4:2:0 -quality "85%" \
@@ -486,7 +494,7 @@ function make_qc() {
     ${tmpdir}/qc/s_classified.rgb \
     ${tmpdir}/qc/t_mask.rgb \
     ${tmpdir}/qc/t_classified.rgb \
-    $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).qc.mask.classified.jpg
+    "$(bids_suffix "_desc-maskClassified_qc" jpg)"
 
   convert -background black -strip -append \
     -interlace Plane -sampling-factor 4:2:0 -quality "85%" \
@@ -496,15 +504,15 @@ function make_qc() {
     ${tmpdir}/qc/s_nlin_outline.rgb \
     ${tmpdir}/qc/t_outline.rgb \
     ${tmpdir}/qc/t_nlin_outline.rgb \
-    $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).qc.registration.jpg
+    "$(bids_suffix "_desc-registration_qc" jpg)"
 
   # If webp software is available animate a before/after image
-  if command -v img2webp; then
+  if command -v img2webp &>/dev/null; then
     img2webp -d 1000 -lossy -min_size \
-      $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).qc.bias.jpg \
-      $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).qc.mask.classified.jpg \
-      $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).qc.registration.jpg \
-      -o $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).qc.webp || true
+      "$(bids_suffix "_desc-biasCorrection_qc" jpg)" \
+      "$(bids_suffix "_desc-maskClassified_qc" jpg)" \
+      "$(bids_suffix "_desc-registration_qc" jpg)" \
+      -o "$(bids_suffix "_qc" webp)" || true
   fi
 }
 
@@ -579,39 +587,46 @@ hierarchical_N3() {
   rm -rf ${tmpdir}
 }
 
+if [[ "$(basename "${_arg_output}")" == *.* && "${_arg_output}" != *.mnc ]]; then
+  failure "Output '${_arg_output}' must be a .mnc file or an extensionless name"
+fi
+
 # Output checking
 if [[ "${_arg_clobber}" == "off" ]]; then
-  for file in ${_arg_output} \
-    $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).mask_nocsf.mnc \
-    $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).mask_withcsf.mnc \
-    $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).classify.mnc \
-    $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).posterior1.mnc \
-    $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).posterior2.mnc \
-    $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).posterior3.mnc \
-    $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).posterior4.mnc \
-    $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).denoise.mnc \
-    $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).affine_to_model.xfm \
-    $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).nlin_to_model.xfm \
-    $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).nlin_from_model.xfm \
-    $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).ICV.xfm \
-    $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).qc.webp \
-    $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).qc.mask.classified.jpg \
-    $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).qc.bias.jpg \
-    $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).qc.registration.jpg \
-    $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).lsq6.mask_nocsf.mnc \
-    $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).lsq6.mask_withcsf.mnc \
-    $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).lsq6.classify.mnc \
-    $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).lsq6.posterior1.mnc \
-    $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).lsq6.posterior2.mnc \
-    $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).lsq6.posterior3.mnc \
-    $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).lsq6.posterior4.mnc \
-    $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).lsq6.denoise.mnc; do
+  _clobber_files=(
+    "${_arg_output}"
+    "$(bids_suffix "_label-brainnocsf_mask")"
+    "$(bids_suffix "_label-brainwithcsf_mask")"
+    "$(bids_suffix "_dseg")"
+    "$(bids_suffix "_dseg" tsv)"
+    "$(bids_suffix "_desc-denoised_T1w")"
+    "$(bids_suffix "_from-T1w_to-model_desc-affine" xfm)"
+    "$(bids_suffix "_from-T1w_to-model_desc-nonlinear" xfm)"
+    "$(bids_suffix "_from-T1w_to-model_desc-nonlinear_grid0")"
+    "$(bids_suffix "_from-model_to-T1w_desc-nonlinear" xfm)"
+    "$(bids_suffix "_from-model_to-T1w_desc-nonlinear_grid0")"
+    "$(bids_suffix "_desc-maskClassified_qc" jpg)"
+    "$(bids_suffix "_desc-biasCorrection_qc" jpg)"
+    "$(bids_suffix "_desc-registration_qc" jpg)"
+  )
+  if command -v img2webp &>/dev/null; then
+    _clobber_files+=("$(bids_suffix "_qc" webp)")
+  fi
+  if [[ "${_arg_lsq6_resample_type}" != "none" ]]; then
+    _clobber_files+=(
+      "$(bids_suffix "_space-LSQ6_label-brainnocsf_mask")"
+      "$(bids_suffix "_space-LSQ6_label-brainwithcsf_mask")"
+      "$(bids_suffix "_space-LSQ6_dseg")"
+      "$(bids_suffix "_space-LSQ6_T1w")"
+      "$(bids_suffix "_from-T1w_to-LSQ6_desc-rigid" xfm)"
+    )
+  fi
+  for file in "${_clobber_files[@]}"; do
     if [[ -s "${file}" ]]; then
       failure "File ${file} already exists and --clobber not specified!"
     fi
   done
 fi
-
 RESAMPLEMODEL="${QUARANTINE_PATH}/resources/mni_icbm152_nlin_sym_09c_minc2/mni_icbm152_t1_tal_nlin_sym_09c.mnc"
 RESAMPLEMASK="${QUARANTINE_PATH}/resources/mni_icbm152_nlin_sym_09c_minc2/mni_icbm152_t1_tal_nlin_sym_09c_mask.mnc"
 RESAMPLEOUTLINE="${QUARANTINE_PATH}/resources/mni_icbm152_nlin_sym_09c_minc2/mni_icbm152_t1_tal_nlin_sym_09c_outline.mnc"
@@ -904,23 +919,41 @@ mincresample -clobber -unsigned -short -tfm_input_sampling \
   ${_arg_output}
 mincresample -clobber -unsigned -short -tfm_input_sampling \
   -transform ${tmpdir}/transform_to_input.xfm ${tmpdir}/corrected_denoise_scaled.mnc \
-  $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).denoise.mnc
+  "$(bids_suffix "_desc-denoised_T1w")"
 
 mincresample -clobber -labels -unsigned -byte -tfm_input_sampling \
   -transform ${tmpdir}/transform_to_input.xfm ${tmpdir}/mask_withcsf.mnc \
-  $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).mask_withcsf.mnc
+  "$(bids_suffix "_label-brainwithcsf_mask")"
 
 mincresample -clobber -labels -unsigned -byte -tfm_input_sampling \
   -transform ${tmpdir}/transform_to_input.xfm ${tmpdir}/mask_nocsf_resample_filled.mnc \
-  $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).mask_nocsf.mnc
+  "$(bids_suffix "_label-brainnocsf_mask")"
 
 mincresample -clobber -labels -unsigned -byte -tfm_input_sampling \
   -transform ${tmpdir}/transform_to_input.xfm ${tmpdir}/classify.mnc \
-  $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).classify.mnc
+  "$(bids_suffix "_dseg")"
 
-cp -f ${tmpdir}/to_model_0_GenericAffine.xfm $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).affine_to_model.xfm
-cp -f ${tmpdir}/to_model_1_NL.xfm $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).nlin_to_model.xfm
-cp -f ${tmpdir}/to_model_1_inverse_NL.xfm $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).nlin_from_model.xfm
+# Label lookup table for the discrete segmentation (BIDS _dseg.tsv).
+# index = pipeline label (Atropos prior order); mapping = BIDS standard index.
+{
+  printf 'index\tname\tabbreviation\tmapping\n'
+  printf '1\tCerebrospinal Fluid\tCSF\t3\n'
+  printf '2\tGray Matter\tGM\t1\n'
+  printf '3\tWhite Matter\tWM\t2\n'
+  [[ -n ${DEEPGMPRIOR:-} ]] && printf '4\tSubcortical Gray Matter\tSGM\t9\n'
+} > "$(bids_suffix "_dseg" tsv)"
+
+# TODO: BEP 014 (spatial transforms) may stabilize with _mode-image_xfm suffix;
+# revisit naming when the spec is finalized.
+cp -f ${tmpdir}/to_model_0_GenericAffine.xfm "$(bids_suffix "_from-T1w_to-model_desc-affine" xfm)"
+
+cp -f ${tmpdir}/to_model_1_NL_grid_0.mnc "$(bids_suffix "_from-T1w_to-model_desc-nonlinear_grid0")"
+sed "s|$(basename ${tmpdir}/to_model_1_NL_grid_0.mnc)|$(basename "$(bids_suffix "_from-T1w_to-model_desc-nonlinear_grid0")")|g" \
+  ${tmpdir}/to_model_1_NL.xfm > "$(bids_suffix "_from-T1w_to-model_desc-nonlinear" xfm)"
+
+cp -f ${tmpdir}/to_model_1_inverse_NL_grid_0.mnc "$(bids_suffix "_from-model_to-T1w_desc-nonlinear_grid0")"
+sed "s|$(basename ${tmpdir}/to_model_1_inverse_NL_grid_0.mnc)|$(basename "$(bids_suffix "_from-model_to-T1w_desc-nonlinear_grid0")")|g" \
+  ${tmpdir}/to_model_1_inverse_NL.xfm > "$(bids_suffix "_from-model_to-T1w_desc-nonlinear" xfm)"
 
 if [[ "${_arg_lsq6_resample_type}" != "none" ]]; then
   # Create LSQ6 version of affine transform
@@ -928,27 +961,27 @@ if [[ "${_arg_lsq6_resample_type}" != "none" ]]; then
 
   if [[ ${_arg_lsq6_resample_type} == "coordinates" ]]; then
     mincresample -clobber -unsigned -short -tfm_input_sampling -transform ${tmpdir}/lsq6.xfm -invert_transform ${tmpdir}/corrected_scaled.mnc \
-      $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).lsq6.mnc
+      "$(bids_suffix "_space-LSQ6_T1w")"
   else
     ResampleImage 3 ${RESAMPLEMODEL} ${tmpdir}/resamplemodel.mnc ${_arg_lsq6_resample_type}x${_arg_lsq6_resample_type}x${_arg_lsq6_resample_type} 0
     mincresample -clobber -unsigned -short -like ${tmpdir}/resamplemodel.mnc -transform ${tmpdir}/lsq6.xfm -invert_transform ${tmpdir}/corrected_scaled.mnc \
-      $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).lsq6.mnc
+      "$(bids_suffix "_space-LSQ6_T1w")"
   fi
 
-  cp -f ${tmpdir}/lsq6.xfm $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).lsq6.xfm
+  cp -f ${tmpdir}/lsq6.xfm "$(bids_suffix "_from-T1w_to-LSQ6_desc-rigid" xfm)"
   mincresample -clobber -unsigned -byte -labels \
     -transform ${tmpdir}/lsq6.xfm -invert_transform \
-    -like $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).lsq6.mnc \
+    -like "$(bids_suffix "_space-LSQ6_T1w")" \
     ${tmpdir}/mask_withcsf.mnc \
-    $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).lsq6.mask_withcsf.mnc
+    "$(bids_suffix "_space-LSQ6_label-brainwithcsf_mask")"
   mincresample -clobber -unsigned -byte -labels \
     -transform ${tmpdir}/lsq6.xfm -invert_transform \
-    -like $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).lsq6.mnc \
+    -like "$(bids_suffix "_space-LSQ6_T1w")" \
     ${tmpdir}/mask_nocsf_resample_filled.mnc \
-    $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).lsq6.mask_nocsf.mnc
+    "$(bids_suffix "_space-LSQ6_label-brainnocsf_mask")"
 
-  mincresample -clobber -transform ${tmpdir}/lsq6.xfm -invert_transform -like $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).lsq6.mnc \
-    -keep -near -unsigned -byte -labels ${tmpdir}/classify.mnc $(dirname ${_arg_output})/$(basename ${_arg_output} .mnc).lsq6.classify.mnc
+  mincresample -clobber -transform ${tmpdir}/lsq6.xfm -invert_transform -like "$(bids_suffix "_space-LSQ6_T1w")" \
+    -keep -near -unsigned -byte -labels ${tmpdir}/classify.mnc "$(bids_suffix "_space-LSQ6_dseg")"
 fi
 
 # ] <-- needed because of Argbash
