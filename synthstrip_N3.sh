@@ -15,7 +15,7 @@
 # ARG_OPTIONAL_BOOLEAN([verbose],[v],[Run commands verbosely],[off])
 # ARG_OPTIONAL_BOOLEAN([debug],[d],[Show all internal commands and logic for debug],[])
 # ARG_POSITIONAL_SINGLE([input],[Input MINC or NIFTI file])
-# ARG_POSITIONAL_SINGLE([output],[Output MINC file, also used as basename for secondary outputs])
+# ARG_POSITIONAL_SINGLE([output],[Output MINC or NIfTI file (.mnc/.nii/.nii.gz); the extension selects the format. Also used as basename for secondary outputs])
 # ARGBASH_SET_INDENT([  ])
 # ARGBASH_GO()
 # needed because of Argbash --> m4_ignore([
@@ -57,7 +57,7 @@ print_help() {
   printf '%s\n' "synthstrip_N3 Human T1w Preprocessing"
   printf 'Usage: %s [-h|--help] [--distance <arg>] [--levels <arg>] [--cycles <arg>] [--iters <arg>] [--lambda <arg>] [--fwhm <arg>] [--stop <arg>] [--isostep <arg>] [--prior-config <arg>] [--lsq6-resample-type <arg>] [-c|--(no-)clobber] [-v|--(no-)verbose] [-d|--(no-)debug] <input> <output>\n' "$0"
   printf '\t%s\n' "<input>: Input MINC or NIFTI file"
-  printf '\t%s\n' "<output>: Output MINC file, also used as basename for secondary outputs"
+  printf '\t%s\n' "<output>: Output MINC or NIfTI file (.mnc/.nii/.nii.gz); the extension selects the format. Also used as basename for secondary outputs"
   printf '\t%s\n' "-h, --help: Prints help"
   printf '\t%s\n' "--distance: Initial distance for correction (default: '400')"
   printf '\t%s\n' "--levels: Levels of correction with distance halving (default: '4')"
@@ -349,12 +349,50 @@ function bids_suffix() {
   local base
   base="$(dirname "${_arg_output}")/$(basename "${_arg_output}" | extension_strip | sed 's/_[Tt]1[Ww]$//')"
   local suffix="$1"
-  local ext="${2:-mnc}"
+  local ext="${2:-${vol_ext:-mnc}}"
   echo "${base}${suffix}.${ext}"
 }
 
 function extension_strip() {
   sed -r 's/(.nii$|.nii.gz|.nrrd|.mnc|.mnc.gz)$//'
+}
+
+# Copy a finished MINC volume to its destination, converting to NIfTI when the
+# destination is .nii/.nii.gz. mnc2nii writes uncompressed .nii; gzip yields .nii.gz.
+function emit_volume() {
+  local src="$1" dest="$2"
+  shift 2
+  if [[ "${dest}" == *.nii || "${dest}" == *.nii.gz ]]; then
+    # Remaining args are voxel-type flags (e.g. -unsigned -byte) forwarded so label
+    # and mask volumes stay integer; mnc2nii defaults to float32 otherwise.
+    mnc2nii -quiet "$@" "${src}" "${dest%.gz}"
+    if [[ "${dest}" == *.gz ]]; then
+      gzip -f "${dest%.gz}"
+    fi
+  else
+    cp -f "${src}" "${dest}"
+  fi
+}
+
+# Run mincresample, converting the result to NIfTI when the destination (last arg)
+# is .nii/.nii.gz. mincresample only writes MINC, so NIfTI goes via a tmp .mnc.
+function mincresample_out() {
+  local dest="${@: -1}"
+  local args=("${@:1:$#-1}")
+  if [[ "${dest}" == *.nii || "${dest}" == *.nii.gz ]]; then
+    local tmp="${tmpdir}/out_$(basename "${dest}" | extension_strip).mnc"
+    mincresample "${args[@]}" "${tmp}"
+    # Carry the voxel-type flags from mincresample through to mnc2nii.
+    local typeflags=() a
+    for a in "${args[@]}"; do
+      case "${a}" in
+        -byte|-short|-int|-long|-float|-double|-signed|-unsigned) typeflags+=("${a}") ;;
+      esac
+    done
+    emit_volume "${tmp}" "${dest}" "${typeflags[@]}"
+  else
+    mincresample "${args[@]}" "${dest}"
+  fi
 }
 # Create tmpdir in the form $TMPDIR/tmp.$SCRIPTNAME.$INPUTFILE
 # Later functions extend to $TMPDIR/tmp.$SCRIPTNAME.$INPUTFILE/$FUNCTION 
@@ -587,9 +625,17 @@ hierarchical_N3() {
   rm -rf ${tmpdir}
 }
 
-if [[ "$(basename "${_arg_output}")" == *.* && "${_arg_output}" != *.mnc ]]; then
-  failure "Output '${_arg_output}' must be a .mnc file or an extensionless name"
-fi
+# Output format is inferred from the output extension; vol_ext is the extension
+# used for every image-volume output (main image, masks, dseg, denoised, LSQ6).
+# Transforms (.xfm), deformation grids (.mnc), the _dseg.tsv table and QC images
+# keep their own formats regardless.
+case "$(basename "${_arg_output}")" in
+  *.nii.gz) vol_ext="nii.gz" ;;
+  *.nii)    vol_ext="nii" ;;
+  *.mnc)    vol_ext="mnc" ;;
+  *.*)      failure "Output '${_arg_output}' must be a .mnc, .nii, or .nii.gz file (or an extensionless name)" ;;
+  *)        vol_ext="mnc" ;;
+esac
 
 # Output checking
 if [[ "${_arg_clobber}" == "off" ]]; then
@@ -602,9 +648,9 @@ if [[ "${_arg_clobber}" == "off" ]]; then
     "$(bids_suffix "_desc-denoised_T1w")"
     "$(bids_suffix "_from-T1w_to-model_desc-affine" xfm)"
     "$(bids_suffix "_from-T1w_to-model_desc-nonlinear" xfm)"
-    "$(bids_suffix "_from-T1w_to-model_desc-nonlinear_grid0")"
+    "$(bids_suffix "_from-T1w_to-model_desc-nonlinear_grid0" mnc)"
     "$(bids_suffix "_from-model_to-T1w_desc-nonlinear" xfm)"
-    "$(bids_suffix "_from-model_to-T1w_desc-nonlinear_grid0")"
+    "$(bids_suffix "_from-model_to-T1w_desc-nonlinear_grid0" mnc)"
     "$(bids_suffix "_desc-maskClassified_qc" jpg)"
     "$(bids_suffix "_desc-biasCorrection_qc" jpg)"
     "$(bids_suffix "_desc-registration_qc" jpg)"
@@ -914,22 +960,22 @@ minccalc -unsigned -short -expression "clamp((A[0]<${wm_mean})?A[0]:(${wm_mean}/
 
 make_qc
 
-mincresample -clobber -unsigned -short -tfm_input_sampling \
+mincresample_out -clobber -unsigned -short -tfm_input_sampling \
   -transform ${tmpdir}/transform_to_input.xfm ${tmpdir}/corrected_scaled.mnc \
   ${_arg_output}
-mincresample -clobber -unsigned -short -tfm_input_sampling \
+mincresample_out -clobber -unsigned -short -tfm_input_sampling \
   -transform ${tmpdir}/transform_to_input.xfm ${tmpdir}/corrected_denoise_scaled.mnc \
   "$(bids_suffix "_desc-denoised_T1w")"
 
-mincresample -clobber -labels -unsigned -byte -tfm_input_sampling \
+mincresample_out -clobber -labels -unsigned -byte -tfm_input_sampling \
   -transform ${tmpdir}/transform_to_input.xfm ${tmpdir}/mask_withcsf.mnc \
   "$(bids_suffix "_label-brainwithcsf_mask")"
 
-mincresample -clobber -labels -unsigned -byte -tfm_input_sampling \
+mincresample_out -clobber -labels -unsigned -byte -tfm_input_sampling \
   -transform ${tmpdir}/transform_to_input.xfm ${tmpdir}/mask_nocsf_resample_filled.mnc \
   "$(bids_suffix "_label-brainnocsf_mask")"
 
-mincresample -clobber -labels -unsigned -byte -tfm_input_sampling \
+mincresample_out -clobber -labels -unsigned -byte -tfm_input_sampling \
   -transform ${tmpdir}/transform_to_input.xfm ${tmpdir}/classify.mnc \
   "$(bids_suffix "_dseg")"
 
@@ -947,40 +993,43 @@ mincresample -clobber -labels -unsigned -byte -tfm_input_sampling \
 # revisit naming when the spec is finalized.
 cp -f ${tmpdir}/to_model_0_GenericAffine.xfm "$(bids_suffix "_from-T1w_to-model_desc-affine" xfm)"
 
-cp -f ${tmpdir}/to_model_1_NL_grid_0.mnc "$(bids_suffix "_from-T1w_to-model_desc-nonlinear_grid0")"
-sed "s|$(basename ${tmpdir}/to_model_1_NL_grid_0.mnc)|$(basename "$(bids_suffix "_from-T1w_to-model_desc-nonlinear_grid0")")|g" \
+cp -f ${tmpdir}/to_model_1_NL_grid_0.mnc "$(bids_suffix "_from-T1w_to-model_desc-nonlinear_grid0" mnc)"
+sed "s|$(basename ${tmpdir}/to_model_1_NL_grid_0.mnc)|$(basename "$(bids_suffix "_from-T1w_to-model_desc-nonlinear_grid0" mnc)")|g" \
   ${tmpdir}/to_model_1_NL.xfm > "$(bids_suffix "_from-T1w_to-model_desc-nonlinear" xfm)"
 
-cp -f ${tmpdir}/to_model_1_inverse_NL_grid_0.mnc "$(bids_suffix "_from-model_to-T1w_desc-nonlinear_grid0")"
-sed "s|$(basename ${tmpdir}/to_model_1_inverse_NL_grid_0.mnc)|$(basename "$(bids_suffix "_from-model_to-T1w_desc-nonlinear_grid0")")|g" \
+cp -f ${tmpdir}/to_model_1_inverse_NL_grid_0.mnc "$(bids_suffix "_from-model_to-T1w_desc-nonlinear_grid0" mnc)"
+sed "s|$(basename ${tmpdir}/to_model_1_inverse_NL_grid_0.mnc)|$(basename "$(bids_suffix "_from-model_to-T1w_desc-nonlinear_grid0" mnc)")|g" \
   ${tmpdir}/to_model_1_inverse_NL.xfm > "$(bids_suffix "_from-model_to-T1w_desc-nonlinear" xfm)"
 
 if [[ "${_arg_lsq6_resample_type}" != "none" ]]; then
   # Create LSQ6 version of affine transform
   lsq12_to_lsq6 ${tmpdir}/to_model_0_GenericAffine.xfm ${tmpdir}/lsq6.xfm
 
+  # Write LSQ6 T1w to a tmp MINC first: the mask/dseg resamples below use it as the
+  # -like geometry reference, which must be MINC even when the emitted output is NIfTI.
   if [[ ${_arg_lsq6_resample_type} == "coordinates" ]]; then
     mincresample -clobber -unsigned -short -tfm_input_sampling -transform ${tmpdir}/lsq6.xfm -invert_transform ${tmpdir}/corrected_scaled.mnc \
-      "$(bids_suffix "_space-LSQ6_T1w")"
+      ${tmpdir}/space-LSQ6_T1w.mnc
   else
     ResampleImage 3 ${RESAMPLEMODEL} ${tmpdir}/resamplemodel.mnc ${_arg_lsq6_resample_type}x${_arg_lsq6_resample_type}x${_arg_lsq6_resample_type} 0
     mincresample -clobber -unsigned -short -like ${tmpdir}/resamplemodel.mnc -transform ${tmpdir}/lsq6.xfm -invert_transform ${tmpdir}/corrected_scaled.mnc \
-      "$(bids_suffix "_space-LSQ6_T1w")"
+      ${tmpdir}/space-LSQ6_T1w.mnc
   fi
+  emit_volume ${tmpdir}/space-LSQ6_T1w.mnc "$(bids_suffix "_space-LSQ6_T1w")" -unsigned -short
 
   cp -f ${tmpdir}/lsq6.xfm "$(bids_suffix "_from-T1w_to-LSQ6_desc-rigid" xfm)"
-  mincresample -clobber -unsigned -byte -labels \
+  mincresample_out -clobber -unsigned -byte -labels \
     -transform ${tmpdir}/lsq6.xfm -invert_transform \
-    -like "$(bids_suffix "_space-LSQ6_T1w")" \
+    -like ${tmpdir}/space-LSQ6_T1w.mnc \
     ${tmpdir}/mask_withcsf.mnc \
     "$(bids_suffix "_space-LSQ6_label-brainwithcsf_mask")"
-  mincresample -clobber -unsigned -byte -labels \
+  mincresample_out -clobber -unsigned -byte -labels \
     -transform ${tmpdir}/lsq6.xfm -invert_transform \
-    -like "$(bids_suffix "_space-LSQ6_T1w")" \
+    -like ${tmpdir}/space-LSQ6_T1w.mnc \
     ${tmpdir}/mask_nocsf_resample_filled.mnc \
     "$(bids_suffix "_space-LSQ6_label-brainnocsf_mask")"
 
-  mincresample -clobber -transform ${tmpdir}/lsq6.xfm -invert_transform -like "$(bids_suffix "_space-LSQ6_T1w")" \
+  mincresample_out -clobber -transform ${tmpdir}/lsq6.xfm -invert_transform -like ${tmpdir}/space-LSQ6_T1w.mnc \
     -keep -near -unsigned -byte -labels ${tmpdir}/classify.mnc "$(bids_suffix "_space-LSQ6_dseg")"
 fi
 
