@@ -63,6 +63,17 @@ Usage: ./synthstrip_N3.sh [-h|--help] [--distance <arg>] [--levels <arg>] [--cyc
 
 ## Outputs
 
+The output format is chosen by the extension of the `<output>` argument: `.mnc`
+(default), `.nii`, or `.nii.gz`. All image-volume outputs (the main image, brain
+masks, tissue segmentation, denoised image, and LSQ6-space volumes) are written in
+that format. Spatial transforms follow suit: in MINC mode they are native MINC
+`.xfm` files plus their referenced deformation grids (`.mnc`); in NIfTI mode they
+are ITK transforms — a `.mat` affine and `1Warp.nii.gz`/`1InverseWarp.nii.gz`
+displacement fields. The `_dseg.tsv` label table and QC images always keep their
+native formats.
+
+Given an output basename `example.mnc` the following outputs are created:
+
 ```
  example.mnc
  example_desc-denoised_T1w.mnc

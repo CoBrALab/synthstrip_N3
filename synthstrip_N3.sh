@@ -646,15 +646,26 @@ if [[ "${_arg_clobber}" == "off" ]]; then
     "$(bids_suffix "_dseg")"
     "$(bids_suffix "_dseg" tsv)"
     "$(bids_suffix "_desc-denoised_T1w")"
-    "$(bids_suffix "_from-T1w_to-model_desc-affine" xfm)"
-    "$(bids_suffix "_from-T1w_to-model_desc-nonlinear" xfm)"
-    "$(bids_suffix "_from-T1w_to-model_desc-nonlinear_grid0" mnc)"
-    "$(bids_suffix "_from-model_to-T1w_desc-nonlinear" xfm)"
-    "$(bids_suffix "_from-model_to-T1w_desc-nonlinear_grid0" mnc)"
     "$(bids_suffix "_desc-maskClassified_qc" jpg)"
     "$(bids_suffix "_desc-biasCorrection_qc" jpg)"
     "$(bids_suffix "_desc-registration_qc" jpg)"
   )
+  # Transform outputs follow the volume format: MINC -> .xfm + grid; NIfTI -> ITK .mat/.nii.gz.
+  if [[ ${vol_ext} == mnc ]]; then
+    _clobber_files+=(
+      "$(bids_suffix "_from-T1w_to-model_desc-affine" xfm)"
+      "$(bids_suffix "_from-T1w_to-model_desc-nonlinear" xfm)"
+      "$(bids_suffix "_from-T1w_to-model_desc-nonlinear_grid0" mnc)"
+      "$(bids_suffix "_from-model_to-T1w_desc-nonlinear" xfm)"
+      "$(bids_suffix "_from-model_to-T1w_desc-nonlinear_grid0" mnc)"
+    )
+  else
+    _clobber_files+=(
+      "$(bids_suffix "_from-T1w_to-model_0GenericAffine" mat)"
+      "$(bids_suffix "_from-T1w_to-model_1Warp" nii.gz)"
+      "$(bids_suffix "_from-T1w_to-model_1InverseWarp" nii.gz)"
+    )
+  fi
   if command -v img2webp &>/dev/null; then
     _clobber_files+=("$(bids_suffix "_qc" webp)")
   fi
@@ -664,8 +675,12 @@ if [[ "${_arg_clobber}" == "off" ]]; then
       "$(bids_suffix "_space-LSQ6_label-brainwithcsf_mask")"
       "$(bids_suffix "_space-LSQ6_dseg")"
       "$(bids_suffix "_space-LSQ6_T1w")"
-      "$(bids_suffix "_from-T1w_to-LSQ6_desc-rigid" xfm)"
     )
+    if [[ ${vol_ext} == mnc ]]; then
+      _clobber_files+=("$(bids_suffix "_from-T1w_to-LSQ6_desc-rigid" xfm)")
+    else
+      _clobber_files+=("$(bids_suffix "_from-T1w_to-LSQ6_0GenericAffine" mat)")
+    fi
   fi
   for file in "${_clobber_files[@]}"; do
     if [[ -s "${file}" ]]; then
@@ -991,15 +1006,31 @@ mincresample_out -clobber -labels -unsigned -byte -tfm_input_sampling \
 
 # TODO: BEP 014 (spatial transforms) may stabilize with _mode-image_xfm suffix;
 # revisit naming when the spec is finalized.
-cp -f ${tmpdir}/to_model_0_GenericAffine.xfm "$(bids_suffix "_from-T1w_to-model_desc-affine" xfm)"
+if [[ ${vol_ext} == mnc ]]; then
+  # MINC mode: native .xfm transforms plus their referenced deformation grids (.mnc).
+  cp -f ${tmpdir}/to_model_0_GenericAffine.xfm "$(bids_suffix "_from-T1w_to-model_desc-affine" xfm)"
 
-cp -f ${tmpdir}/to_model_1_NL_grid_0.mnc "$(bids_suffix "_from-T1w_to-model_desc-nonlinear_grid0" mnc)"
-sed "s|$(basename ${tmpdir}/to_model_1_NL_grid_0.mnc)|$(basename "$(bids_suffix "_from-T1w_to-model_desc-nonlinear_grid0" mnc)")|g" \
-  ${tmpdir}/to_model_1_NL.xfm > "$(bids_suffix "_from-T1w_to-model_desc-nonlinear" xfm)"
+  cp -f ${tmpdir}/to_model_1_NL_grid_0.mnc "$(bids_suffix "_from-T1w_to-model_desc-nonlinear_grid0" mnc)"
+  sed "s|$(basename ${tmpdir}/to_model_1_NL_grid_0.mnc)|$(basename "$(bids_suffix "_from-T1w_to-model_desc-nonlinear_grid0" mnc)")|g" \
+    ${tmpdir}/to_model_1_NL.xfm > "$(bids_suffix "_from-T1w_to-model_desc-nonlinear" xfm)"
 
-cp -f ${tmpdir}/to_model_1_inverse_NL_grid_0.mnc "$(bids_suffix "_from-model_to-T1w_desc-nonlinear_grid0" mnc)"
-sed "s|$(basename ${tmpdir}/to_model_1_inverse_NL_grid_0.mnc)|$(basename "$(bids_suffix "_from-model_to-T1w_desc-nonlinear_grid0" mnc)")|g" \
-  ${tmpdir}/to_model_1_inverse_NL.xfm > "$(bids_suffix "_from-model_to-T1w_desc-nonlinear" xfm)"
+  cp -f ${tmpdir}/to_model_1_inverse_NL_grid_0.mnc "$(bids_suffix "_from-model_to-T1w_desc-nonlinear_grid0" mnc)"
+  sed "s|$(basename ${tmpdir}/to_model_1_inverse_NL_grid_0.mnc)|$(basename "$(bids_suffix "_from-model_to-T1w_desc-nonlinear_grid0" mnc)")|g" \
+    ${tmpdir}/to_model_1_inverse_NL.xfm > "$(bids_suffix "_from-model_to-T1w_desc-nonlinear" xfm)"
+else
+  # NIfTI mode: re-run the registration on the NIfTI brain images so ANTs emits ITK
+  # transforms (.mat + warp .nii.gz) directly, rather than mixing MINC and NIfTI in
+  # one ITK process to convert the .xfm/grid (the reader bug the helper refuses).
+  antsRegistration_affine_SyN.sh --clobber \
+    --initial-transform com \
+    ${tmpdir}/precorrect2_denoise_extracted.nii.gz \
+    ${tmpdir}/model_extracted.nii.gz \
+    ${tmpdir}/to_model_itk_
+
+  cp -f ${tmpdir}/to_model_itk_0GenericAffine.mat "$(bids_suffix "_from-T1w_to-model_0GenericAffine" mat)"
+  cp -f ${tmpdir}/to_model_itk_1Warp.nii.gz "$(bids_suffix "_from-T1w_to-model_1Warp" nii.gz)"
+  cp -f ${tmpdir}/to_model_itk_1InverseWarp.nii.gz "$(bids_suffix "_from-T1w_to-model_1InverseWarp" nii.gz)"
+fi
 
 if [[ "${_arg_lsq6_resample_type}" != "none" ]]; then
   # Create LSQ6 version of affine transform
@@ -1017,7 +1048,15 @@ if [[ "${_arg_lsq6_resample_type}" != "none" ]]; then
   fi
   emit_volume ${tmpdir}/space-LSQ6_T1w.mnc "$(bids_suffix "_space-LSQ6_T1w")" -unsigned -short
 
-  cp -f ${tmpdir}/lsq6.xfm "$(bids_suffix "_from-T1w_to-LSQ6_desc-rigid" xfm)"
+  if [[ ${vol_ext} == mnc ]]; then
+    cp -f ${tmpdir}/lsq6.xfm "$(bids_suffix "_from-T1w_to-LSQ6_desc-rigid" xfm)"
+  else
+    # Affine-only transform: collapse the MINC .xfm to an ITK .mat. No grid file is
+    # referenced, so no MINC image is read and the ITK-MINC mixing bug is avoided.
+    antsApplyTransforms -d 3 -r ${tmpdir}/model_extracted.nii.gz \
+      -t ${tmpdir}/lsq6.xfm \
+      -o Linear[ "$(bids_suffix "_from-T1w_to-LSQ6_0GenericAffine" mat)",0 ]
+  fi
   mincresample_out -clobber -unsigned -byte -labels \
     -transform ${tmpdir}/lsq6.xfm -invert_transform \
     -like ${tmpdir}/space-LSQ6_T1w.mnc \
