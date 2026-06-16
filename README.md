@@ -7,7 +7,7 @@ There are two key implementation details which the core design is focused on
 
 1. Implementing a `nu_correct` (aka N3) multi-scale variant similar to `N4BiasFieldCorrection` (aka ITKN4)
 2. Iteratively refining the correction to the bias field by classifying the brain
-tissue and focusing on the spatial intensity distribution within that tissue.
+   tissue and focusing on the spatial intensity distribution within that tissue.
 
 In addition, the following standardization steps are performed:
 
@@ -63,22 +63,41 @@ Usage: ./synthstrip_N3.sh [-h|--help] [--distance <arg>] [--levels <arg>] [--cyc
 
 ## Outputs
 
-Given an output basename `example.mnc` the following outputs are created:
+Given an output basename `example.mnc` the following BIDS-compliant outputs are created:
 
 ```
- example.classify.mnc
- example.denoise.mnc
- example.mnc
- example.qc.bias.jpg
- example.qc.mask.classified.jpg
- example.qc.registration.jpg
- example.qc.webp
- example.affine_to_model.xfm
- example.mask_nocsf.mnc
- example.mask_withcsf.mnc
- example.nlin_from_model.xfm
- example.nlin_to_model.xfm
+ example.mnc
+ example_desc-denoised_T1w.mnc
+ example_label-brainnocsf_mask.mnc
+ example_label-brainwithcsf_mask.mnc
+ example_dseg.mnc
+ example_dseg.tsv
+ example_from-T1w_to-model_desc-affine.xfm
+ example_from-T1w_to-model_desc-nonlinear.xfm
+ example_from-T1w_to-model_desc-nonlinear_grid0.mnc
+ example_from-model_to-T1w_desc-nonlinear.xfm
+ example_from-model_to-T1w_desc-nonlinear_grid0.mnc
+ example_desc-biasCorrection_qc.jpg
+ example_desc-maskClassified_qc.jpg
+ example_desc-registration_qc.jpg
+ example_qc.webp
 ```
+
+### Segmentation labels
+
+The discrete tissue segmentation (`_dseg.mnc`) is accompanied by a BIDS
+`_dseg.tsv` label lookup table. The `index` column is the pipeline label
+(Atropos prior order); `mapping` is the BIDS standard tissue index.
+
+| index | name                    | abbreviation | mapping |
+| ----- | ----------------------- | ------------ | ------- |
+| 1     | Cerebrospinal Fluid     | CSF          | 3       |
+| 2     | Gray Matter             | GM           | 1       |
+| 3     | White Matter            | WM           | 2       |
+| 4     | Subcortical Gray Matter | SGM          | 9       |
+
+Label 4 (SGM) is only present when a deep gray matter prior (`DEEPGMPRIOR`) is
+configured.
 
 ## Getting Priors
 
@@ -89,6 +108,7 @@ and available upon request.
 ## Adding your own priors
 
 If you want to provide your own priors, the following files are required:
+
 - `REGISTRATIONMODEL` - the t1-weighted image
 - `REGISTRATIONBRAINMASK` - the brain mask
 - `WMPRIOR` - a probability map of white matter
@@ -96,16 +116,17 @@ If you want to provide your own priors, the following files are required:
 - `CSFPRIOR` - a probability map of CSF
 - (if your template is not in MNI space) `MNI_XFM`, an affine transform from your template to MNI ICBM NLIN SYM 09c space
 
-Generate a config file defining these variables and provide it to the ``--prior-config`` option.
+Generate a config file defining these variables and provide it to the `--prior-config` option.
 
 ## Quality Control Outputs
 
 `synthstrip_N3.sh` provides 3 quality control images, which provide feedback on the success of the following stages
-- `<basename>.qc.bias.jpg`, alternating rows of the original image and the bias-corrected image
-- `<basename>.qc.mask.classified.jpg`, alternating rows of the brain mask image and the classified image
-- `<basename>.qc.bias.jpg`, alternating rows of the affine MNI outline image and the nlin MNI outline image
 
-Additionally, `<basename>.qc.webp` an animated image which combined the static images together.
+- `<basename>_desc-biasCorrection_qc.jpg`, alternating rows of the original image and the bias-corrected image
+- `<basename>_desc-maskClassified_qc.jpg`, alternating rows of the brain mask image and the classified image
+- `<basename>_desc-registration_qc.jpg`, alternating rows of the affine MNI outline image and the nlin MNI outline image
+
+Additionally, `<basename>_qc.webp` an animated image which combines the static images together.
 
 ### Bias Field QC Example
 
