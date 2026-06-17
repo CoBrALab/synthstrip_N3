@@ -394,6 +394,66 @@ function mincresample_out() {
     mincresample "${args[@]}" "${dest}"
   fi
 }
+
+# Apply ANTs registration transforms to a MINC image, honouring the output format.
+# MINC mode is a plain antsApplyTransforms passthrough. NIfTI mode converts the -i/-r
+# images to NIfTI (the ITK transforms live in that frame) and the -o result to MINC.
+function reg_apply() {
+  if [[ ${vol_ext} == mnc ]]; then
+    antsApplyTransforms "$@"
+    return
+  fi
+  local args=() out_mnc="" ref_mnc="" interp="trilinear" tmp n=0
+  while (($#)); do
+    case "$1" in
+      -i)
+        tmp="${tmpdir}/reg_apply_in_${n}.nii"
+        n=$((n + 1))
+        mnc2nii -quiet "$2" "${tmp}"
+        args+=("-i" "${tmp}")
+        shift 2
+        ;;
+      -r)
+        ref_mnc="$2"
+        tmp="${tmpdir}/reg_apply_in_${n}.nii"
+        n=$((n + 1))
+        mnc2nii -quiet "$2" "${tmp}"
+        args+=("-r" "${tmp}")
+        shift 2
+        ;;
+      -o)
+        out_mnc="$2"
+        args+=("-o" "${tmpdir}/reg_apply_out.nii")
+        shift 2
+        ;;
+      -n)
+        case "$2" in
+          GenericLabel* | NearestNeighbor* | MultiLabel*) interp="nearest" ;;
+          *) interp="trilinear" ;;
+        esac
+        args+=("-n" "$2")
+        shift 2
+        ;;
+      *)
+        args+=("$1")
+        shift
+        ;;
+    esac
+  done
+  antsApplyTransforms "${args[@]}"
+  # nii->mnc loses origin precision (NIfTI affine is float32); snap back onto the exact
+  # MINC reference grid so strict ITK steps (ExtractRegion, Atropos) don't reject it.
+  nii2mnc -quiet -clobber "${tmpdir}/reg_apply_out.nii" "${tmpdir}/reg_apply_out.mnc"
+  if [[ -n ${ref_mnc} && ${interp} == nearest ]]; then
+    mincresample -quiet -clobber -near -labels -like "${ref_mnc}" \
+      "${tmpdir}/reg_apply_out.mnc" "${out_mnc}"
+  elif [[ -n ${ref_mnc} ]]; then
+    mincresample -quiet -clobber -like "${ref_mnc}" \
+      "${tmpdir}/reg_apply_out.mnc" "${out_mnc}"
+  else
+    cp -f "${tmpdir}/reg_apply_out.mnc" "${out_mnc}"
+  fi
+}
 # Create tmpdir in the form $TMPDIR/tmp.$SCRIPTNAME.$INPUTFILE
 # Later functions extend to $TMPDIR/tmp.$SCRIPTNAME.$INPUTFILE/$FUNCTION 
 
@@ -422,23 +482,23 @@ function make_qc() {
 
   # Resample into MNI space for all the inputs for standard visualization
   # Classification
-  antsApplyTransforms -d 3 ${MNI_XFM:+-t ${MNI_XFM}} -t ${tmpdir}/to_model_0_GenericAffine.xfm \
+  reg_apply -d 3 ${MNI_XFM:+-t ${MNI_XFM}} -t ${REG_AFFINE} \
     -i ${tmpdir}/classify.mnc -o ${tmpdir}/qc/classify.mnc -r ${RESAMPLEMODEL} -n GenericLabel
 
   # Masks
-  antsApplyTransforms -d 3 ${MNI_XFM:+-t ${MNI_XFM}} -t ${tmpdir}/to_model_0_GenericAffine.xfm \
+  reg_apply -d 3 ${MNI_XFM:+-t ${MNI_XFM}} -t ${REG_AFFINE} \
     -i ${tmpdir}/mask_nocsf_resample_filled.mnc -o ${tmpdir}/qc/mask.mnc -r ${RESAMPLEMODEL} -n GenericLabel
 
   # Final Corrected Image
-  antsApplyTransforms -d 3 ${MNI_XFM:+-t ${MNI_XFM}} -t ${tmpdir}/to_model_0_GenericAffine.xfm \
+  reg_apply -d 3 ${MNI_XFM:+-t ${MNI_XFM}} -t ${REG_AFFINE} \
     -i ${tmpdir}/corrected_denoise_scaled.mnc -o ${tmpdir}/qc/corrected.mnc -r ${RESAMPLEMODEL} -n BSpline[5]
 
   # Final Corrected Image with nlin
-  antsApplyTransforms -d 3 ${MNI_XFM:+-t ${MNI_XFM}} -t ${tmpdir}/to_model_1_NL.xfm -t ${tmpdir}/to_model_0_GenericAffine.xfm \
+  reg_apply -d 3 ${MNI_XFM:+-t ${MNI_XFM}} -t ${REG_NL_FWD} -t ${REG_AFFINE} \
     -i ${tmpdir}/corrected_denoise_scaled.mnc -o ${tmpdir}/qc/corrected_nlin.mnc -r ${RESAMPLEMODEL} -n BSpline[5]
 
   # Original input image
-  antsApplyTransforms -d 3 ${MNI_XFM:+-t ${MNI_XFM}} -t ${tmpdir}/to_model_0_GenericAffine.xfm \
+  reg_apply -d 3 ${MNI_XFM:+-t ${MNI_XFM}} -t ${REG_AFFINE} \
     -i ${tmpdir}/origqcref.mnc -o ${tmpdir}/qc/orig.mnc -r ${RESAMPLEMODEL} -n BSpline[5]
 
   # Resample REGISTRATIONOUTLINE and use it if defined
@@ -637,6 +697,25 @@ case "$(basename "${_arg_output}")" in
   *)        vol_ext="mnc" ;;
 esac
 
+# Registration runs natively in the output format: MINC inputs yield .xfm transforms,
+# NIfTI inputs yield ITK .mat/.nii.gz. REG_AFFINE/REG_NL_FWD/REG_NL_INV name the
+# results, consumed by every downstream antsApplyTransforms and the output copy.
+if [[ ${vol_ext} == mnc ]]; then
+  reg_subject1=${tmpdir}/precorrect1_denoise_extracted.mnc
+  reg_subject2=${tmpdir}/precorrect2_denoise_extracted.mnc
+  reg_model=${tmpdir}/model_extracted.mnc
+  REG_AFFINE=${tmpdir}/to_model_0_GenericAffine.xfm
+  REG_NL_FWD=${tmpdir}/to_model_1_NL.xfm
+  REG_NL_INV=${tmpdir}/to_model_1_inverse_NL.xfm
+else
+  reg_subject1=${tmpdir}/precorrect1_denoise_extracted.nii.gz
+  reg_subject2=${tmpdir}/precorrect2_denoise_extracted.nii.gz
+  reg_model=${tmpdir}/model_extracted.nii.gz
+  REG_AFFINE=${tmpdir}/to_model_0GenericAffine.mat
+  REG_NL_FWD=${tmpdir}/to_model_1Warp.nii.gz
+  REG_NL_INV=${tmpdir}/to_model_1InverseWarp.nii.gz
+fi
+
 # Output checking
 if [[ "${_arg_clobber}" == "off" ]]; then
   _clobber_files=(
@@ -790,8 +869,8 @@ nii2mnc -quiet -unsigned -byte -clobber ${tmpdir}/model_mask.nii.gz ${tmpdir}/mo
 
 # Register to MNI model to use its foreground mask and FOV
 antsRegistration_affine_SyN.sh --skip-nonlinear \
-  ${tmpdir}/precorrect1_denoise_extracted.mnc \
-  ${tmpdir}/model_extracted.mnc \
+  ${reg_subject1} \
+  ${reg_model} \
   ${tmpdir}/to_model_
 
 minccalc -clobber -unsigned -byte -expression '1' ${REGISTRATIONMODEL} ${tmpdir}/model_fovmask.mnc
@@ -800,7 +879,7 @@ minccalc -clobber -unsigned -byte -expression '1' ${REGISTRATIONMODEL} ${tmpdir}
 volpad -distance $(calc "int(${scale_factor}*50)") ${input} ${tmpdir}/padded_input.mnc
 
 # Transform the masks to match the padded image
-antsApplyTransforms -d 3 -i ${tmpdir}/model_fovmask.mnc -t [ ${tmpdir}/to_model_0_GenericAffine.xfm,1 ] \
+reg_apply -d 3 -i ${tmpdir}/model_fovmask.mnc -t [ ${REG_AFFINE},1 ] \
   -o ${tmpdir}/subject_fovmask.mnc -r ${tmpdir}/padded_input.mnc -n GenericLabel
 antsApplyTransforms -d 3 -i ${tmpdir}/fgmask.mnc \
   -o ${tmpdir}/fgmask.mnc -r ${tmpdir}/padded_input.mnc -n GenericLabel
@@ -842,9 +921,9 @@ nii2mnc -quiet -clobber ${tmpdir}/mask_nocsf.nii.gz ${tmpdir}/mask_nocsf.mnc
 nii2mnc -quiet -clobber ${tmpdir}/precorrect2_denoise_extracted.nii.gz ${tmpdir}/precorrect2_denoise_extracted.mnc
 
 antsRegistration_affine_SyN.sh --clobber \
-  --initial-transform ${tmpdir}/to_model_0_GenericAffine.xfm \
-  ${tmpdir}/precorrect2_denoise_extracted.mnc \
-  ${tmpdir}/model_extracted.mnc \
+  --initial-transform ${REG_AFFINE} \
+  ${reg_subject2} \
+  ${reg_model} \
   ${tmpdir}/to_model_
 
 # Otsu threshold the brain mask to get a mask with no ventricles
@@ -870,21 +949,21 @@ antsApplyTransforms -d 3 -n GenericLabel \
   -o ${tmpdir}/mask_nocsf.mnc
 
 if [[ -s ${DEEPGMPRIOR:-} ]]; then
-  antsApplyTransforms -d 3 -i ${DEEPGMPRIOR} -t [ ${tmpdir}/to_model_0_GenericAffine.xfm,1 ] \
-    -t ${tmpdir}/to_model_1_inverse_NL.xfm \
+  reg_apply -d 3 -i ${DEEPGMPRIOR} -t [ ${REG_AFFINE},1 ] \
+    -t ${REG_NL_INV} \
     -n Linear --verbose \
     -r ${tmpdir}/corrected_denoise.mnc -o ${tmpdir}/prior4.mnc
 fi
-antsApplyTransforms -d 3 -i ${WMPRIOR} -t [ ${tmpdir}/to_model_0_GenericAffine.xfm,1 ] \
-  -t ${tmpdir}/to_model_1_inverse_NL.xfm \
+reg_apply -d 3 -i ${WMPRIOR} -t [ ${REG_AFFINE},1 ] \
+  -t ${REG_NL_INV} \
   -n Linear --verbose \
   -r ${tmpdir}/corrected_denoise.mnc -o ${tmpdir}/prior3.mnc
-antsApplyTransforms -d 3 -i ${GMPRIOR} -t [ ${tmpdir}/to_model_0_GenericAffine.xfm,1 ] \
-  -t ${tmpdir}/to_model_1_inverse_NL.xfm \
+reg_apply -d 3 -i ${GMPRIOR} -t [ ${REG_AFFINE},1 ] \
+  -t ${REG_NL_INV} \
   -n Linear --verbose \
   -r ${tmpdir}/corrected_denoise.mnc -o ${tmpdir}/prior2.mnc
-antsApplyTransforms -d 3 -i ${CSFPRIOR} -t [ ${tmpdir}/to_model_0_GenericAffine.xfm,1 ] \
-  -t ${tmpdir}/to_model_1_inverse_NL.xfm \
+reg_apply -d 3 -i ${CSFPRIOR} -t [ ${REG_AFFINE},1 ] \
+  -t ${REG_NL_INV} \
   -n Linear --verbose \
   -r ${tmpdir}/corrected_denoise.mnc -o ${tmpdir}/prior1.mnc
 
@@ -1018,23 +1097,26 @@ if [[ ${vol_ext} == mnc ]]; then
   sed "s|$(basename ${tmpdir}/to_model_1_inverse_NL_grid_0.mnc)|$(basename "$(bids_suffix "_from-model_to-T1w_desc-nonlinear_grid0" mnc)")|g" \
     ${tmpdir}/to_model_1_inverse_NL.xfm > "$(bids_suffix "_from-model_to-T1w_desc-nonlinear" xfm)"
 else
-  # NIfTI mode: re-run the registration on the NIfTI brain images so ANTs emits ITK
-  # transforms (.mat + warp .nii.gz) directly, rather than mixing MINC and NIfTI in
-  # one ITK process to convert the .xfm/grid (the reader bug the helper refuses).
-  antsRegistration_affine_SyN.sh --clobber \
-    --initial-transform com \
-    ${tmpdir}/precorrect2_denoise_extracted.nii.gz \
-    ${tmpdir}/model_extracted.nii.gz \
-    ${tmpdir}/to_model_itk_
-
-  cp -f ${tmpdir}/to_model_itk_0GenericAffine.mat "$(bids_suffix "_from-T1w_to-model_0GenericAffine" mat)"
-  cp -f ${tmpdir}/to_model_itk_1Warp.nii.gz "$(bids_suffix "_from-T1w_to-model_1Warp" nii.gz)"
-  cp -f ${tmpdir}/to_model_itk_1InverseWarp.nii.gz "$(bids_suffix "_from-T1w_to-model_1InverseWarp" nii.gz)"
+  # NIfTI mode: registration already emitted ITK transforms, just copy them out.
+  cp -f ${REG_AFFINE} "$(bids_suffix "_from-T1w_to-model_0GenericAffine" mat)"
+  cp -f ${REG_NL_FWD} "$(bids_suffix "_from-T1w_to-model_1Warp" nii.gz)"
+  cp -f ${REG_NL_INV} "$(bids_suffix "_from-T1w_to-model_1InverseWarp" nii.gz)"
 fi
 
 if [[ "${_arg_lsq6_resample_type}" != "none" ]]; then
-  # Create LSQ6 version of affine transform
-  lsq12_to_lsq6 ${tmpdir}/to_model_0_GenericAffine.xfm ${tmpdir}/lsq6.xfm
+  # Create LSQ6 version of affine transform from a MINC-world affine .xfm.
+  if [[ ${vol_ext} == mnc ]]; then
+    lsq6_affine=${REG_AFFINE}
+  else
+    # lsq12_to_lsq6 needs a MINC-world .xfm; the ITK .mat -> .xfm conversion is
+    # frame-naive and misplaces the brain, so re-derive the affine natively in MINC.
+    antsRegistration_affine_SyN.sh --clobber --skip-nonlinear \
+      ${tmpdir}/precorrect2_denoise_extracted.mnc \
+      ${tmpdir}/model_extracted.mnc \
+      ${tmpdir}/lsq6_minc_
+    lsq6_affine=${tmpdir}/lsq6_minc_0_GenericAffine.xfm
+  fi
+  lsq12_to_lsq6 ${lsq6_affine} ${tmpdir}/lsq6.xfm
 
   # Write LSQ6 T1w to a tmp MINC first: the mask/dseg resamples below use it as the
   # -like geometry reference, which must be MINC even when the emitted output is NIfTI.
@@ -1051,11 +1133,13 @@ if [[ "${_arg_lsq6_resample_type}" != "none" ]]; then
   if [[ ${vol_ext} == mnc ]]; then
     cp -f ${tmpdir}/lsq6.xfm "$(bids_suffix "_from-T1w_to-LSQ6_desc-rigid" xfm)"
   else
-    # Affine-only transform: collapse the MINC .xfm to an ITK .mat. No grid file is
-    # referenced, so no MINC image is read and the ITK-MINC mixing bug is avoided.
-    antsApplyTransforms -d 3 -r ${tmpdir}/model_extracted.nii.gz \
-      -t ${tmpdir}/lsq6.xfm \
-      -o Linear[ "$(bids_suffix "_from-T1w_to-LSQ6_0GenericAffine" mat)",0 ]
+    # Emit the rigid as an ITK .mat, built in ITK frame (.mat -> .xfm, lsq12_to_lsq6,
+    # .xfm -> .mat): the two frame-naive conversions cancel, giving a correct LPS .mat.
+    antsApplyTransforms -d 3 -r "${reg_model}" -t "${REG_AFFINE}" \
+      -o "Linear[${tmpdir}/lsq6_itk_affine.xfm,0]"
+    lsq12_to_lsq6 ${tmpdir}/lsq6_itk_affine.xfm ${tmpdir}/lsq6_itk.xfm
+    antsApplyTransforms -d 3 -r "${reg_model}" -t "${tmpdir}/lsq6_itk.xfm" \
+      -o "Linear[$(bids_suffix "_from-T1w_to-LSQ6_0GenericAffine" mat),0]"
   fi
   mincresample_out -clobber -unsigned -byte -labels \
     -transform ${tmpdir}/lsq6.xfm -invert_transform \
