@@ -395,9 +395,9 @@ function mincresample_out() {
   fi
 }
 
-# Apply ANTs registration transforms to a MINC image, honouring the output format.
-# MINC mode is a plain antsApplyTransforms passthrough. NIfTI mode converts the -i/-r
-# images to NIfTI (the ITK transforms live in that frame) and the -o result to MINC.
+# Apply registration transforms to a MINC image, matching the output format.
+# MINC mode: just run antsApplyTransforms. NIfTI mode: the transforms are NIfTI-format,
+# so convert the input/reference to NIfTI first, then convert the result back to MINC.
 function reg_apply() {
   if [[ ${vol_ext} == mnc ]]; then
     antsApplyTransforms "$@"
@@ -441,8 +441,8 @@ function reg_apply() {
     esac
   done
   antsApplyTransforms "${args[@]}"
-  # nii->mnc loses origin precision (NIfTI affine is float32); snap back onto the exact
-  # MINC reference grid so strict ITK steps (ExtractRegion, Atropos) don't reject it.
+  # The NIfTI round-trip shifts the origin a little (NIfTI stores it as float32), so
+  # resample back onto the original MINC grid -- later steps reject the tiny mismatch.
   nii2mnc -quiet -clobber "${tmpdir}/reg_apply_out.nii" "${tmpdir}/reg_apply_out.mnc"
   if [[ -n ${ref_mnc} && ${interp} == nearest ]]; then
     mincresample -quiet -clobber -near -labels -like "${ref_mnc}" \
@@ -697,9 +697,9 @@ case "$(basename "${_arg_output}")" in
   *)        vol_ext="mnc" ;;
 esac
 
-# Registration runs natively in the output format: MINC inputs yield .xfm transforms,
-# NIfTI inputs yield ITK .mat/.nii.gz. REG_AFFINE/REG_NL_FWD/REG_NL_INV name the
-# results, consumed by every downstream antsApplyTransforms and the output copy.
+# Registration runs in the output format: MINC inputs produce .xfm transforms, NIfTI
+# inputs produce .mat/.nii.gz. REG_AFFINE/REG_NL_FWD/REG_NL_INV point at whichever set
+# got made; everything downstream uses these names.
 if [[ ${vol_ext} == mnc ]]; then
   reg_subject1=${tmpdir}/precorrect1_denoise_extracted.mnc
   reg_subject2=${tmpdir}/precorrect2_denoise_extracted.mnc
@@ -729,7 +729,7 @@ if [[ "${_arg_clobber}" == "off" ]]; then
     "$(bids_suffix "_desc-biasCorrection_qc" jpg)"
     "$(bids_suffix "_desc-registration_qc" jpg)"
   )
-  # Transform outputs follow the volume format: MINC -> .xfm + grid; NIfTI -> ITK .mat/.nii.gz.
+  # Transform files follow the volume format: MINC -> .xfm + grid; NIfTI -> .mat/.nii.gz.
   if [[ ${vol_ext} == mnc ]]; then
     _clobber_files+=(
       "$(bids_suffix "_from-T1w_to-model_desc-affine" xfm)"
@@ -1086,7 +1086,7 @@ mincresample_out -clobber -labels -unsigned -byte -tfm_input_sampling \
 # TODO: BEP 014 (spatial transforms) may stabilize with _mode-image_xfm suffix;
 # revisit naming when the spec is finalized.
 if [[ ${vol_ext} == mnc ]]; then
-  # MINC mode: native .xfm transforms plus their referenced deformation grids (.mnc).
+  # MINC mode: copy out the .xfm transforms and the deformation grids they point to.
   cp -f ${tmpdir}/to_model_0_GenericAffine.xfm "$(bids_suffix "_from-T1w_to-model_desc-affine" xfm)"
 
   cp -f ${tmpdir}/to_model_1_NL_grid_0.mnc "$(bids_suffix "_from-T1w_to-model_desc-nonlinear_grid0" mnc)"
@@ -1097,24 +1097,26 @@ if [[ ${vol_ext} == mnc ]]; then
   sed "s|$(basename ${tmpdir}/to_model_1_inverse_NL_grid_0.mnc)|$(basename "$(bids_suffix "_from-model_to-T1w_desc-nonlinear_grid0" mnc)")|g" \
     ${tmpdir}/to_model_1_inverse_NL.xfm > "$(bids_suffix "_from-model_to-T1w_desc-nonlinear" xfm)"
 else
-  # NIfTI mode: registration already emitted ITK transforms, just copy them out.
+  # NIfTI mode: registration already produced these transforms, just copy them out.
   cp -f ${REG_AFFINE} "$(bids_suffix "_from-T1w_to-model_0GenericAffine" mat)"
   cp -f ${REG_NL_FWD} "$(bids_suffix "_from-T1w_to-model_1Warp" nii.gz)"
   cp -f ${REG_NL_INV} "$(bids_suffix "_from-T1w_to-model_1InverseWarp" nii.gz)"
 fi
 
 if [[ "${_arg_lsq6_resample_type}" != "none" ]]; then
-  # Create LSQ6 version of affine transform from a MINC-world affine .xfm.
+  # Build the rigid (LSQ6) transform from a MINC-frame (RAS) affine .xfm.
   if [[ ${vol_ext} == mnc ]]; then
     lsq6_affine=${REG_AFFINE}
   else
-    # lsq12_to_lsq6 needs a MINC-world .xfm; the ITK .mat -> .xfm conversion is
-    # frame-naive and misplaces the brain, so re-derive the affine natively in MINC.
-    antsRegistration_affine_SyN.sh --clobber --skip-nonlinear \
-      ${tmpdir}/precorrect2_denoise_extracted.mnc \
-      ${tmpdir}/model_extracted.mnc \
-      ${tmpdir}/lsq6_minc_
-    lsq6_affine=${tmpdir}/lsq6_minc_0_GenericAffine.xfm
+    # REG_AFFINE is an ITK .mat (LPS). antsApplyTransforms rewrites it to a .xfm without
+    # touching the numbers, so the .xfm still holds LPS values. Conjugate by the LPS<->RAS
+    # flip (negate x,y) to get a genuine RAS affine that MINC tools read correctly.
+    antsApplyTransforms -d 3 -r "${reg_model}" -t "${REG_AFFINE}" \
+      -o "Linear[${tmpdir}/affine_lps.xfm,0]"
+    param2xfm -clobber -scales -1 -1 1 ${tmpdir}/lps_ras_flip.xfm
+    xfmconcat -clobber ${tmpdir}/lps_ras_flip.xfm ${tmpdir}/affine_lps.xfm ${tmpdir}/lps_ras_flip.xfm \
+      ${tmpdir}/affine_ras.xfm
+    lsq6_affine=${tmpdir}/affine_ras.xfm
   fi
   lsq12_to_lsq6 ${lsq6_affine} ${tmpdir}/lsq6.xfm
 
@@ -1133,12 +1135,12 @@ if [[ "${_arg_lsq6_resample_type}" != "none" ]]; then
   if [[ ${vol_ext} == mnc ]]; then
     cp -f ${tmpdir}/lsq6.xfm "$(bids_suffix "_from-T1w_to-LSQ6_desc-rigid" xfm)"
   else
-    # Emit the rigid as an ITK .mat, built in ITK frame (.mat -> .xfm, lsq12_to_lsq6,
-    # .xfm -> .mat): the two frame-naive conversions cancel, giving a correct LPS .mat.
-    antsApplyTransforms -d 3 -r "${reg_model}" -t "${REG_AFFINE}" \
-      -o "Linear[${tmpdir}/lsq6_itk_affine.xfm,0]"
-    lsq12_to_lsq6 ${tmpdir}/lsq6_itk_affine.xfm ${tmpdir}/lsq6_itk.xfm
-    antsApplyTransforms -d 3 -r "${reg_model}" -t "${tmpdir}/lsq6_itk.xfm" \
+    # Emit the same rigid as an ITK .mat. lsq6.xfm is RAS; conjugate back by the flip to
+    # restore LPS numbers, then write to .mat (the write is number-preserving). Image and
+    # .mat both come from lsq6.xfm now, so they match exactly.
+    xfmconcat -clobber ${tmpdir}/lps_ras_flip.xfm ${tmpdir}/lsq6.xfm ${tmpdir}/lps_ras_flip.xfm \
+      ${tmpdir}/lsq6_lps.xfm
+    antsApplyTransforms -d 3 -r "${reg_model}" -t "${tmpdir}/lsq6_lps.xfm" \
       -o "Linear[$(bids_suffix "_from-T1w_to-LSQ6_0GenericAffine" mat),0]"
   fi
   mincresample_out -clobber -unsigned -byte -labels \

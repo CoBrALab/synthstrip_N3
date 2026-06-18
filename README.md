@@ -72,6 +72,11 @@ are ITK transforms — a `.mat` affine and `1Warp.nii.gz`/`1InverseWarp.nii.gz`
 displacement fields. The `_dseg.tsv` label table and QC images always keep their
 native formats.
 
+> **Note:** registration runs natively in the output format, so a `.mnc` and a
+> `.nii.gz` run of the same subject are independent fits — their transforms differ by
+> sub-voxel noise (~0.04 mm). Within one run everything is consistent. Formats register
+> natively because converting the nonlinear MINC grid to an ITK warp hits a reader bug.
+
 Given an output basename `example.mnc` the following outputs are created:
 
 ```
