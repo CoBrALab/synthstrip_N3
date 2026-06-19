@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
     libjpeg62 \
     imagemagick \
     parallel \
+    webp \
     perl \
     && apt-get autoremove -y \
     && apt-get clean \
@@ -38,6 +39,18 @@ RUN wget -q https://github.com/ANTsX/ANTs/releases/download/v2.6.5/ants-2.6.5-ub
     && mv /opt/ants-2.6.5/bin/* /opt/minc/1.9.18/bin/ \
     && rm -rf /opt/ants-2.6.5 \
     && rm /tmp/ants.zip
+
+# The pipeline calls the skullstrip tool as 'synthstrip', but the base image ships it as
+# /freesurfer/mri_synthstrip; expose it under the expected name (flags are identical).
+RUN ln -s /freesurfer/mri_synthstrip /usr/local/bin/synthstrip
+
+# Install CoBrALab minc-toolkit-extras (provides antsRegistration_affine_SyN.sh, used for
+# the affine/SyN registration to model space). Pure bash scripts, added to PATH.
+RUN wget -q https://github.com/CoBrALab/minc-toolkit-extras/archive/refs/heads/master.tar.gz -O /tmp/mte.tgz \
+    && mkdir -p /opt/minc-toolkit-extras \
+    && tar xzf /tmp/mte.tgz -C /opt/minc-toolkit-extras --strip-components=1 \
+    && rm /tmp/mte.tgz
+ENV PATH="/opt/minc-toolkit-extras:${PATH}"
 
 # MINC compression level
 ENV MINC_COMPRESS=4
