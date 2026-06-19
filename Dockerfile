@@ -41,12 +41,32 @@ RUN wget -q https://github.com/ANTsX/ANTs/releases/download/v2.6.5/ants-2.6.5-ub
 # MINC compression level
 ENV MINC_COMPRESS=4
 
+# Bake in the default registration model and tissue priors (mni_icbm152_nlin_sym_09c).
+# The script/configs expect them under ${QUARANTINE_PATH}/resources/... (mirror BIC layout
+# so neither synthstrip_N3.sh nor configs/*.cfg need editing).
+ENV QUARANTINE_PATH=/opt/quarantine
+ENV MODELDIR=${QUARANTINE_PATH}/resources/mni_icbm152_nlin_sym_09c_minc2
+
+# The zip stores files at its root, so extract the needed volumes by bare name (flatten
+# with -j). Covers the registration model, brain mask, QC outline, and wm/gm/csf priors.
+RUN mkdir -p ${MODELDIR} \
+    && wget -q http://www.bic.mni.mcgill.ca/~vfonov/icbm/2009/mni_icbm152_nlin_sym_09c_minc2.zip -O /tmp/m.zip \
+    && unzip -j /tmp/m.zip -d ${MODELDIR} \
+         mni_icbm152_t1_tal_nlin_sym_09c.mnc \
+         mni_icbm152_t1_tal_nlin_sym_09c_mask.mnc \
+         mni_icbm152_t1_tal_nlin_sym_09c_outline.mnc \
+         mni_icbm152_wm_tal_nlin_sym_09c.mnc \
+         mni_icbm152_gm_tal_nlin_sym_09c.mnc \
+         mni_icbm152_csf_tal_nlin_sym_09c.mnc \
+    && rm -f /tmp/m.zip
+
 # Copy pipeline scripts
 COPY synthstrip_N3.sh /usr/local/bin/synthstrip_N3.sh
 RUN chmod +x /usr/local/bin/synthstrip_N3.sh
 
-# Copy configuration files
-COPY configs/ /usr/local/share/synthstrip_N3/configs/
+# Copy configuration files. The script resolves configs relative to its own location
+# (${__dir}/configs), so they must sit next to synthstrip_N3.sh in /usr/local/bin.
+COPY configs/ /usr/local/bin/configs/
 
 # Create entrypoint wrapper that sources MINC environment before running the script
 # This ensures proper environment setup in both Docker and Apptainer/Singularity
