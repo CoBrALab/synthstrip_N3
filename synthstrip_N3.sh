@@ -15,7 +15,7 @@
 # ARG_OPTIONAL_BOOLEAN([verbose],[v],[Run commands verbosely],[off])
 # ARG_OPTIONAL_BOOLEAN([debug],[d],[Show all internal commands and logic for debug],[])
 # ARG_POSITIONAL_SINGLE([input],[Input MINC or NIFTI file])
-# ARG_POSITIONAL_SINGLE([output],[Output MINC file, also used as basename for secondary outputs])
+# ARG_POSITIONAL_SINGLE([output],[Output MINC or NIfTI file (.mnc/.nii/.nii.gz); the extension selects the format. Also used as basename for secondary outputs])
 # ARGBASH_SET_INDENT([  ])
 # ARGBASH_GO()
 # needed because of Argbash --> m4_ignore([
@@ -57,7 +57,7 @@ print_help() {
   printf '%s\n' "synthstrip_N3 Human T1w Preprocessing"
   printf 'Usage: %s [-h|--help] [--distance <arg>] [--levels <arg>] [--cycles <arg>] [--iters <arg>] [--lambda <arg>] [--fwhm <arg>] [--stop <arg>] [--isostep <arg>] [--prior-config <arg>] [--lsq6-resample-type <arg>] [-c|--(no-)clobber] [-v|--(no-)verbose] [-d|--(no-)debug] <input> <output>\n' "$0"
   printf '\t%s\n' "<input>: Input MINC or NIFTI file"
-  printf '\t%s\n' "<output>: Output MINC file, also used as basename for secondary outputs"
+  printf '\t%s\n' "<output>: Output MINC or NIfTI file (.mnc/.nii/.nii.gz); the extension selects the format. Also used as basename for secondary outputs"
   printf '\t%s\n' "-h, --help: Prints help"
   printf '\t%s\n' "--distance: Initial distance for correction (default: '400')"
   printf '\t%s\n' "--levels: Levels of correction with distance halving (default: '4')"
@@ -349,12 +349,110 @@ function bids_suffix() {
   local base
   base="$(dirname "${_arg_output}")/$(basename "${_arg_output}" | extension_strip | sed 's/_[Tt]1[Ww]$//')"
   local suffix="$1"
-  local ext="${2:-mnc}"
+  local ext="${2:-${vol_ext:-mnc}}"
   echo "${base}${suffix}.${ext}"
 }
 
 function extension_strip() {
   sed -r 's/(.nii$|.nii.gz|.nrrd|.mnc|.mnc.gz)$//'
+}
+
+# Copy a finished MINC volume to its destination, converting to NIfTI when the
+# destination is .nii/.nii.gz. mnc2nii writes uncompressed .nii; gzip yields .nii.gz.
+function emit_volume() {
+  local src="$1" dest="$2"
+  shift 2
+  if [[ "${dest}" == *.nii || "${dest}" == *.nii.gz ]]; then
+    # Remaining args are voxel-type flags (e.g. -unsigned -byte) forwarded so label
+    # and mask volumes stay integer; mnc2nii defaults to float32 otherwise.
+    mnc2nii -quiet "$@" "${src}" "${dest%.gz}"
+    if [[ "${dest}" == *.gz ]]; then
+      gzip -f "${dest%.gz}"
+    fi
+  else
+    cp -f "${src}" "${dest}"
+  fi
+}
+
+# Run mincresample, converting the result to NIfTI when the destination (last arg)
+# is .nii/.nii.gz. mincresample only writes MINC, so NIfTI goes via a tmp .mnc.
+function mincresample_out() {
+  local dest="${@: -1}"
+  local args=("${@:1:$#-1}")
+  if [[ "${dest}" == *.nii || "${dest}" == *.nii.gz ]]; then
+    local tmp="${tmpdir}/out_$(basename "${dest}" | extension_strip).mnc"
+    mincresample "${args[@]}" "${tmp}"
+    # Carry the voxel-type flags from mincresample through to mnc2nii.
+    local typeflags=() a
+    for a in "${args[@]}"; do
+      case "${a}" in
+        -byte|-short|-int|-long|-float|-double|-signed|-unsigned) typeflags+=("${a}") ;;
+      esac
+    done
+    emit_volume "${tmp}" "${dest}" "${typeflags[@]}"
+  else
+    mincresample "${args[@]}" "${dest}"
+  fi
+}
+
+# Apply registration transforms to a MINC image, matching the output format.
+# MINC mode: just run antsApplyTransforms. NIfTI mode: the transforms are NIfTI-format,
+# so convert the input/reference to NIfTI first, then convert the result back to MINC.
+function reg_apply() {
+  if [[ ${vol_ext} == mnc ]]; then
+    antsApplyTransforms "$@"
+    return
+  fi
+  local args=() out_mnc="" ref_mnc="" interp="trilinear" tmp n=0
+  while (($#)); do
+    case "$1" in
+      -i)
+        tmp="${tmpdir}/reg_apply_in_${n}.nii"
+        n=$((n + 1))
+        mnc2nii -quiet "$2" "${tmp}"
+        args+=("-i" "${tmp}")
+        shift 2
+        ;;
+      -r)
+        ref_mnc="$2"
+        tmp="${tmpdir}/reg_apply_in_${n}.nii"
+        n=$((n + 1))
+        mnc2nii -quiet "$2" "${tmp}"
+        args+=("-r" "${tmp}")
+        shift 2
+        ;;
+      -o)
+        out_mnc="$2"
+        args+=("-o" "${tmpdir}/reg_apply_out.nii")
+        shift 2
+        ;;
+      -n)
+        case "$2" in
+          GenericLabel* | NearestNeighbor* | MultiLabel*) interp="nearest" ;;
+          *) interp="trilinear" ;;
+        esac
+        args+=("-n" "$2")
+        shift 2
+        ;;
+      *)
+        args+=("$1")
+        shift
+        ;;
+    esac
+  done
+  antsApplyTransforms "${args[@]}"
+  # The NIfTI round-trip shifts the origin a little (NIfTI stores it as float32), so
+  # resample back onto the original MINC grid -- later steps reject the tiny mismatch.
+  nii2mnc -quiet -clobber "${tmpdir}/reg_apply_out.nii" "${tmpdir}/reg_apply_out.mnc"
+  if [[ -n ${ref_mnc} && ${interp} == nearest ]]; then
+    mincresample -quiet -clobber -near -labels -like "${ref_mnc}" \
+      "${tmpdir}/reg_apply_out.mnc" "${out_mnc}"
+  elif [[ -n ${ref_mnc} ]]; then
+    mincresample -quiet -clobber -like "${ref_mnc}" \
+      "${tmpdir}/reg_apply_out.mnc" "${out_mnc}"
+  else
+    cp -f "${tmpdir}/reg_apply_out.mnc" "${out_mnc}"
+  fi
 }
 # Create tmpdir in the form $TMPDIR/tmp.$SCRIPTNAME.$INPUTFILE
 # Later functions extend to $TMPDIR/tmp.$SCRIPTNAME.$INPUTFILE/$FUNCTION 
@@ -384,23 +482,23 @@ function make_qc() {
 
   # Resample into MNI space for all the inputs for standard visualization
   # Classification
-  antsApplyTransforms -d 3 ${MNI_XFM:+-t ${MNI_XFM}} -t ${tmpdir}/to_model_0_GenericAffine.xfm \
+  reg_apply -d 3 ${MNI_XFM:+-t ${MNI_XFM}} -t ${REG_AFFINE} \
     -i ${tmpdir}/classify.mnc -o ${tmpdir}/qc/classify.mnc -r ${RESAMPLEMODEL} -n GenericLabel
 
   # Masks
-  antsApplyTransforms -d 3 ${MNI_XFM:+-t ${MNI_XFM}} -t ${tmpdir}/to_model_0_GenericAffine.xfm \
+  reg_apply -d 3 ${MNI_XFM:+-t ${MNI_XFM}} -t ${REG_AFFINE} \
     -i ${tmpdir}/mask_nocsf_resample_filled.mnc -o ${tmpdir}/qc/mask.mnc -r ${RESAMPLEMODEL} -n GenericLabel
 
   # Final Corrected Image
-  antsApplyTransforms -d 3 ${MNI_XFM:+-t ${MNI_XFM}} -t ${tmpdir}/to_model_0_GenericAffine.xfm \
+  reg_apply -d 3 ${MNI_XFM:+-t ${MNI_XFM}} -t ${REG_AFFINE} \
     -i ${tmpdir}/corrected_denoise_scaled.mnc -o ${tmpdir}/qc/corrected.mnc -r ${RESAMPLEMODEL} -n BSpline[5]
 
   # Final Corrected Image with nlin
-  antsApplyTransforms -d 3 ${MNI_XFM:+-t ${MNI_XFM}} -t ${tmpdir}/to_model_1_NL.xfm -t ${tmpdir}/to_model_0_GenericAffine.xfm \
+  reg_apply -d 3 ${MNI_XFM:+-t ${MNI_XFM}} -t ${REG_NL_FWD} -t ${REG_AFFINE} \
     -i ${tmpdir}/corrected_denoise_scaled.mnc -o ${tmpdir}/qc/corrected_nlin.mnc -r ${RESAMPLEMODEL} -n BSpline[5]
 
   # Original input image
-  antsApplyTransforms -d 3 ${MNI_XFM:+-t ${MNI_XFM}} -t ${tmpdir}/to_model_0_GenericAffine.xfm \
+  reg_apply -d 3 ${MNI_XFM:+-t ${MNI_XFM}} -t ${REG_AFFINE} \
     -i ${tmpdir}/origqcref.mnc -o ${tmpdir}/qc/orig.mnc -r ${RESAMPLEMODEL} -n BSpline[5]
 
   # Resample REGISTRATIONOUTLINE and use it if defined
@@ -587,8 +685,35 @@ hierarchical_N3() {
   rm -rf ${tmpdir}
 }
 
-if [[ "$(basename "${_arg_output}")" == *.* && "${_arg_output}" != *.mnc ]]; then
-  failure "Output '${_arg_output}' must be a .mnc file or an extensionless name"
+# Output format is inferred from the output extension; vol_ext is the extension
+# used for every image-volume output (main image, masks, dseg, denoised, LSQ6).
+# Transforms (.xfm), deformation grids (.mnc), the _dseg.tsv table and QC images
+# keep their own formats regardless.
+case "$(basename "${_arg_output}")" in
+  *.nii.gz) vol_ext="nii.gz" ;;
+  *.nii)    vol_ext="nii" ;;
+  *.mnc)    vol_ext="mnc" ;;
+  *.*)      failure "Output '${_arg_output}' must be a .mnc, .nii, or .nii.gz file (or an extensionless name)" ;;
+  *)        vol_ext="mnc" ;;
+esac
+
+# Registration runs in the output format: MINC inputs produce .xfm transforms, NIfTI
+# inputs produce .mat/.nii.gz. REG_AFFINE/REG_NL_FWD/REG_NL_INV point at whichever set
+# got made; everything downstream uses these names.
+if [[ ${vol_ext} == mnc ]]; then
+  reg_subject1=${tmpdir}/precorrect1_denoise_extracted.mnc
+  reg_subject2=${tmpdir}/precorrect2_denoise_extracted.mnc
+  reg_model=${tmpdir}/model_extracted.mnc
+  REG_AFFINE=${tmpdir}/to_model_0_GenericAffine.xfm
+  REG_NL_FWD=${tmpdir}/to_model_1_NL.xfm
+  REG_NL_INV=${tmpdir}/to_model_1_inverse_NL.xfm
+else
+  reg_subject1=${tmpdir}/precorrect1_denoise_extracted.nii.gz
+  reg_subject2=${tmpdir}/precorrect2_denoise_extracted.nii.gz
+  reg_model=${tmpdir}/model_extracted.nii.gz
+  REG_AFFINE=${tmpdir}/to_model_0GenericAffine.mat
+  REG_NL_FWD=${tmpdir}/to_model_1Warp.nii.gz
+  REG_NL_INV=${tmpdir}/to_model_1InverseWarp.nii.gz
 fi
 
 # Output checking
@@ -600,15 +725,26 @@ if [[ "${_arg_clobber}" == "off" ]]; then
     "$(bids_suffix "_dseg")"
     "$(bids_suffix "_dseg" tsv)"
     "$(bids_suffix "_desc-denoised_T1w")"
-    "$(bids_suffix "_from-T1w_to-model_desc-affine" xfm)"
-    "$(bids_suffix "_from-T1w_to-model_desc-nonlinear" xfm)"
-    "$(bids_suffix "_from-T1w_to-model_desc-nonlinear_grid0")"
-    "$(bids_suffix "_from-model_to-T1w_desc-nonlinear" xfm)"
-    "$(bids_suffix "_from-model_to-T1w_desc-nonlinear_grid0")"
     "$(bids_suffix "_desc-maskClassified_qc" jpg)"
     "$(bids_suffix "_desc-biasCorrection_qc" jpg)"
     "$(bids_suffix "_desc-registration_qc" jpg)"
   )
+  # Transform files follow the volume format: MINC -> .xfm + grid; NIfTI -> .mat/.nii.gz.
+  if [[ ${vol_ext} == mnc ]]; then
+    _clobber_files+=(
+      "$(bids_suffix "_from-T1w_to-model_desc-affine" xfm)"
+      "$(bids_suffix "_from-T1w_to-model_desc-nonlinear" xfm)"
+      "$(bids_suffix "_from-T1w_to-model_desc-nonlinear_grid0" mnc)"
+      "$(bids_suffix "_from-model_to-T1w_desc-nonlinear" xfm)"
+      "$(bids_suffix "_from-model_to-T1w_desc-nonlinear_grid0" mnc)"
+    )
+  else
+    _clobber_files+=(
+      "$(bids_suffix "_from-T1w_to-model_0GenericAffine" mat)"
+      "$(bids_suffix "_from-T1w_to-model_1Warp" nii.gz)"
+      "$(bids_suffix "_from-T1w_to-model_1InverseWarp" nii.gz)"
+    )
+  fi
   if command -v img2webp &>/dev/null; then
     _clobber_files+=("$(bids_suffix "_qc" webp)")
   fi
@@ -618,8 +754,12 @@ if [[ "${_arg_clobber}" == "off" ]]; then
       "$(bids_suffix "_space-LSQ6_label-brainwithcsf_mask")"
       "$(bids_suffix "_space-LSQ6_dseg")"
       "$(bids_suffix "_space-LSQ6_T1w")"
-      "$(bids_suffix "_from-T1w_to-LSQ6_desc-rigid" xfm)"
     )
+    if [[ ${vol_ext} == mnc ]]; then
+      _clobber_files+=("$(bids_suffix "_from-T1w_to-LSQ6_desc-rigid" xfm)")
+    else
+      _clobber_files+=("$(bids_suffix "_from-T1w_to-LSQ6_0GenericAffine" mat)")
+    fi
   fi
   for file in "${_clobber_files[@]}"; do
     if [[ -s "${file}" ]]; then
@@ -729,8 +869,8 @@ nii2mnc -quiet -unsigned -byte -clobber ${tmpdir}/model_mask.nii.gz ${tmpdir}/mo
 
 # Register to MNI model to use its foreground mask and FOV
 antsRegistration_affine_SyN.sh --skip-nonlinear \
-  ${tmpdir}/precorrect1_denoise_extracted.mnc \
-  ${tmpdir}/model_extracted.mnc \
+  ${reg_subject1} \
+  ${reg_model} \
   ${tmpdir}/to_model_
 
 minccalc -clobber -unsigned -byte -expression '1' ${REGISTRATIONMODEL} ${tmpdir}/model_fovmask.mnc
@@ -739,7 +879,7 @@ minccalc -clobber -unsigned -byte -expression '1' ${REGISTRATIONMODEL} ${tmpdir}
 volpad -distance $(calc "int(${scale_factor}*50)") ${input} ${tmpdir}/padded_input.mnc
 
 # Transform the masks to match the padded image
-antsApplyTransforms -d 3 -i ${tmpdir}/model_fovmask.mnc -t [ ${tmpdir}/to_model_0_GenericAffine.xfm,1 ] \
+reg_apply -d 3 -i ${tmpdir}/model_fovmask.mnc -t [ ${REG_AFFINE},1 ] \
   -o ${tmpdir}/subject_fovmask.mnc -r ${tmpdir}/padded_input.mnc -n GenericLabel
 antsApplyTransforms -d 3 -i ${tmpdir}/fgmask.mnc \
   -o ${tmpdir}/fgmask.mnc -r ${tmpdir}/padded_input.mnc -n GenericLabel
@@ -781,9 +921,9 @@ nii2mnc -quiet -clobber ${tmpdir}/mask_nocsf.nii.gz ${tmpdir}/mask_nocsf.mnc
 nii2mnc -quiet -clobber ${tmpdir}/precorrect2_denoise_extracted.nii.gz ${tmpdir}/precorrect2_denoise_extracted.mnc
 
 antsRegistration_affine_SyN.sh --clobber \
-  --initial-transform ${tmpdir}/to_model_0_GenericAffine.xfm \
-  ${tmpdir}/precorrect2_denoise_extracted.mnc \
-  ${tmpdir}/model_extracted.mnc \
+  --initial-transform ${REG_AFFINE} \
+  ${reg_subject2} \
+  ${reg_model} \
   ${tmpdir}/to_model_
 
 # Otsu threshold the brain mask to get a mask with no ventricles
@@ -809,21 +949,21 @@ antsApplyTransforms -d 3 -n GenericLabel \
   -o ${tmpdir}/mask_nocsf.mnc
 
 if [[ -s ${DEEPGMPRIOR:-} ]]; then
-  antsApplyTransforms -d 3 -i ${DEEPGMPRIOR} -t [ ${tmpdir}/to_model_0_GenericAffine.xfm,1 ] \
-    -t ${tmpdir}/to_model_1_inverse_NL.xfm \
+  reg_apply -d 3 -i ${DEEPGMPRIOR} -t [ ${REG_AFFINE},1 ] \
+    -t ${REG_NL_INV} \
     -n Linear --verbose \
     -r ${tmpdir}/corrected_denoise.mnc -o ${tmpdir}/prior4.mnc
 fi
-antsApplyTransforms -d 3 -i ${WMPRIOR} -t [ ${tmpdir}/to_model_0_GenericAffine.xfm,1 ] \
-  -t ${tmpdir}/to_model_1_inverse_NL.xfm \
+reg_apply -d 3 -i ${WMPRIOR} -t [ ${REG_AFFINE},1 ] \
+  -t ${REG_NL_INV} \
   -n Linear --verbose \
   -r ${tmpdir}/corrected_denoise.mnc -o ${tmpdir}/prior3.mnc
-antsApplyTransforms -d 3 -i ${GMPRIOR} -t [ ${tmpdir}/to_model_0_GenericAffine.xfm,1 ] \
-  -t ${tmpdir}/to_model_1_inverse_NL.xfm \
+reg_apply -d 3 -i ${GMPRIOR} -t [ ${REG_AFFINE},1 ] \
+  -t ${REG_NL_INV} \
   -n Linear --verbose \
   -r ${tmpdir}/corrected_denoise.mnc -o ${tmpdir}/prior2.mnc
-antsApplyTransforms -d 3 -i ${CSFPRIOR} -t [ ${tmpdir}/to_model_0_GenericAffine.xfm,1 ] \
-  -t ${tmpdir}/to_model_1_inverse_NL.xfm \
+reg_apply -d 3 -i ${CSFPRIOR} -t [ ${REG_AFFINE},1 ] \
+  -t ${REG_NL_INV} \
   -n Linear --verbose \
   -r ${tmpdir}/corrected_denoise.mnc -o ${tmpdir}/prior1.mnc
 
@@ -914,22 +1054,22 @@ minccalc -unsigned -short -expression "clamp((A[0]<${wm_mean})?A[0]:(${wm_mean}/
 
 make_qc
 
-mincresample -clobber -unsigned -short -tfm_input_sampling \
+mincresample_out -clobber -unsigned -short -tfm_input_sampling \
   -transform ${tmpdir}/transform_to_input.xfm ${tmpdir}/corrected_scaled.mnc \
   ${_arg_output}
-mincresample -clobber -unsigned -short -tfm_input_sampling \
+mincresample_out -clobber -unsigned -short -tfm_input_sampling \
   -transform ${tmpdir}/transform_to_input.xfm ${tmpdir}/corrected_denoise_scaled.mnc \
   "$(bids_suffix "_desc-denoised_T1w")"
 
-mincresample -clobber -labels -unsigned -byte -tfm_input_sampling \
+mincresample_out -clobber -labels -unsigned -byte -tfm_input_sampling \
   -transform ${tmpdir}/transform_to_input.xfm ${tmpdir}/mask_withcsf.mnc \
   "$(bids_suffix "_label-brainwithcsf_mask")"
 
-mincresample -clobber -labels -unsigned -byte -tfm_input_sampling \
+mincresample_out -clobber -labels -unsigned -byte -tfm_input_sampling \
   -transform ${tmpdir}/transform_to_input.xfm ${tmpdir}/mask_nocsf_resample_filled.mnc \
   "$(bids_suffix "_label-brainnocsf_mask")"
 
-mincresample -clobber -labels -unsigned -byte -tfm_input_sampling \
+mincresample_out -clobber -labels -unsigned -byte -tfm_input_sampling \
   -transform ${tmpdir}/transform_to_input.xfm ${tmpdir}/classify.mnc \
   "$(bids_suffix "_dseg")"
 
@@ -945,42 +1085,76 @@ mincresample -clobber -labels -unsigned -byte -tfm_input_sampling \
 
 # TODO: BEP 014 (spatial transforms) may stabilize with _mode-image_xfm suffix;
 # revisit naming when the spec is finalized.
-cp -f ${tmpdir}/to_model_0_GenericAffine.xfm "$(bids_suffix "_from-T1w_to-model_desc-affine" xfm)"
+if [[ ${vol_ext} == mnc ]]; then
+  # MINC mode: copy out the .xfm transforms and the deformation grids they point to.
+  cp -f ${tmpdir}/to_model_0_GenericAffine.xfm "$(bids_suffix "_from-T1w_to-model_desc-affine" xfm)"
 
-cp -f ${tmpdir}/to_model_1_NL_grid_0.mnc "$(bids_suffix "_from-T1w_to-model_desc-nonlinear_grid0")"
-sed "s|$(basename ${tmpdir}/to_model_1_NL_grid_0.mnc)|$(basename "$(bids_suffix "_from-T1w_to-model_desc-nonlinear_grid0")")|g" \
-  ${tmpdir}/to_model_1_NL.xfm > "$(bids_suffix "_from-T1w_to-model_desc-nonlinear" xfm)"
+  cp -f ${tmpdir}/to_model_1_NL_grid_0.mnc "$(bids_suffix "_from-T1w_to-model_desc-nonlinear_grid0" mnc)"
+  sed "s|$(basename ${tmpdir}/to_model_1_NL_grid_0.mnc)|$(basename "$(bids_suffix "_from-T1w_to-model_desc-nonlinear_grid0" mnc)")|g" \
+    ${tmpdir}/to_model_1_NL.xfm > "$(bids_suffix "_from-T1w_to-model_desc-nonlinear" xfm)"
 
-cp -f ${tmpdir}/to_model_1_inverse_NL_grid_0.mnc "$(bids_suffix "_from-model_to-T1w_desc-nonlinear_grid0")"
-sed "s|$(basename ${tmpdir}/to_model_1_inverse_NL_grid_0.mnc)|$(basename "$(bids_suffix "_from-model_to-T1w_desc-nonlinear_grid0")")|g" \
-  ${tmpdir}/to_model_1_inverse_NL.xfm > "$(bids_suffix "_from-model_to-T1w_desc-nonlinear" xfm)"
+  cp -f ${tmpdir}/to_model_1_inverse_NL_grid_0.mnc "$(bids_suffix "_from-model_to-T1w_desc-nonlinear_grid0" mnc)"
+  sed "s|$(basename ${tmpdir}/to_model_1_inverse_NL_grid_0.mnc)|$(basename "$(bids_suffix "_from-model_to-T1w_desc-nonlinear_grid0" mnc)")|g" \
+    ${tmpdir}/to_model_1_inverse_NL.xfm > "$(bids_suffix "_from-model_to-T1w_desc-nonlinear" xfm)"
+else
+  # NIfTI mode: registration already produced these transforms, just copy them out.
+  cp -f ${REG_AFFINE} "$(bids_suffix "_from-T1w_to-model_0GenericAffine" mat)"
+  cp -f ${REG_NL_FWD} "$(bids_suffix "_from-T1w_to-model_1Warp" nii.gz)"
+  cp -f ${REG_NL_INV} "$(bids_suffix "_from-T1w_to-model_1InverseWarp" nii.gz)"
+fi
 
 if [[ "${_arg_lsq6_resample_type}" != "none" ]]; then
-  # Create LSQ6 version of affine transform
-  lsq12_to_lsq6 ${tmpdir}/to_model_0_GenericAffine.xfm ${tmpdir}/lsq6.xfm
+  # Build the rigid (LSQ6) transform from a MINC-frame (RAS) affine .xfm.
+  if [[ ${vol_ext} == mnc ]]; then
+    lsq6_affine=${REG_AFFINE}
+  else
+    # REG_AFFINE is an ITK .mat (LPS). antsApplyTransforms rewrites it to a .xfm without
+    # touching the numbers, so the .xfm still holds LPS values. Conjugate by the LPS<->RAS
+    # flip (negate x,y) to get a genuine RAS affine that MINC tools read correctly.
+    antsApplyTransforms -d 3 -r "${reg_model}" -t "${REG_AFFINE}" \
+      -o "Linear[${tmpdir}/affine_lps.xfm,0]"
+    param2xfm -clobber -scales -1 -1 1 ${tmpdir}/lps_ras_flip.xfm
+    xfmconcat -clobber ${tmpdir}/lps_ras_flip.xfm ${tmpdir}/affine_lps.xfm ${tmpdir}/lps_ras_flip.xfm \
+      ${tmpdir}/affine_ras.xfm
+    lsq6_affine=${tmpdir}/affine_ras.xfm
+  fi
+  lsq12_to_lsq6 ${lsq6_affine} ${tmpdir}/lsq6.xfm
 
+  # Write LSQ6 T1w to a tmp MINC first: the mask/dseg resamples below use it as the
+  # -like geometry reference, which must be MINC even when the emitted output is NIfTI.
   if [[ ${_arg_lsq6_resample_type} == "coordinates" ]]; then
     mincresample -clobber -unsigned -short -tfm_input_sampling -transform ${tmpdir}/lsq6.xfm -invert_transform ${tmpdir}/corrected_scaled.mnc \
-      "$(bids_suffix "_space-LSQ6_T1w")"
+      ${tmpdir}/space-LSQ6_T1w.mnc
   else
     ResampleImage 3 ${RESAMPLEMODEL} ${tmpdir}/resamplemodel.mnc ${_arg_lsq6_resample_type}x${_arg_lsq6_resample_type}x${_arg_lsq6_resample_type} 0
     mincresample -clobber -unsigned -short -like ${tmpdir}/resamplemodel.mnc -transform ${tmpdir}/lsq6.xfm -invert_transform ${tmpdir}/corrected_scaled.mnc \
-      "$(bids_suffix "_space-LSQ6_T1w")"
+      ${tmpdir}/space-LSQ6_T1w.mnc
   fi
+  emit_volume ${tmpdir}/space-LSQ6_T1w.mnc "$(bids_suffix "_space-LSQ6_T1w")" -unsigned -short
 
-  cp -f ${tmpdir}/lsq6.xfm "$(bids_suffix "_from-T1w_to-LSQ6_desc-rigid" xfm)"
-  mincresample -clobber -unsigned -byte -labels \
+  if [[ ${vol_ext} == mnc ]]; then
+    cp -f ${tmpdir}/lsq6.xfm "$(bids_suffix "_from-T1w_to-LSQ6_desc-rigid" xfm)"
+  else
+    # Emit the same rigid as an ITK .mat. lsq6.xfm is RAS; conjugate back by the flip to
+    # restore LPS numbers, then write to .mat (the write is number-preserving). Image and
+    # .mat both come from lsq6.xfm now, so they match exactly.
+    xfmconcat -clobber ${tmpdir}/lps_ras_flip.xfm ${tmpdir}/lsq6.xfm ${tmpdir}/lps_ras_flip.xfm \
+      ${tmpdir}/lsq6_lps.xfm
+    antsApplyTransforms -d 3 -r "${reg_model}" -t "${tmpdir}/lsq6_lps.xfm" \
+      -o "Linear[$(bids_suffix "_from-T1w_to-LSQ6_0GenericAffine" mat),0]"
+  fi
+  mincresample_out -clobber -unsigned -byte -labels \
     -transform ${tmpdir}/lsq6.xfm -invert_transform \
-    -like "$(bids_suffix "_space-LSQ6_T1w")" \
+    -like ${tmpdir}/space-LSQ6_T1w.mnc \
     ${tmpdir}/mask_withcsf.mnc \
     "$(bids_suffix "_space-LSQ6_label-brainwithcsf_mask")"
-  mincresample -clobber -unsigned -byte -labels \
+  mincresample_out -clobber -unsigned -byte -labels \
     -transform ${tmpdir}/lsq6.xfm -invert_transform \
-    -like "$(bids_suffix "_space-LSQ6_T1w")" \
+    -like ${tmpdir}/space-LSQ6_T1w.mnc \
     ${tmpdir}/mask_nocsf_resample_filled.mnc \
     "$(bids_suffix "_space-LSQ6_label-brainnocsf_mask")"
 
-  mincresample -clobber -transform ${tmpdir}/lsq6.xfm -invert_transform -like "$(bids_suffix "_space-LSQ6_T1w")" \
+  mincresample_out -clobber -transform ${tmpdir}/lsq6.xfm -invert_transform -like ${tmpdir}/space-LSQ6_T1w.mnc \
     -keep -near -unsigned -byte -labels ${tmpdir}/classify.mnc "$(bids_suffix "_space-LSQ6_dseg")"
 fi
 

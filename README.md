@@ -44,7 +44,7 @@ neuroimaging research:
 synthstrip_N3 Human T1w Preprocessing
 Usage: ./synthstrip_N3.sh [-h|--help] [--distance <arg>] [--levels <arg>] [--cycles <arg>] [--iters <arg>] [--lambda <arg>] [--fwhm <arg>] [--stop <arg>] [--isostep <arg>] [--prior-config <arg>] [--lsq6-resample-type <arg>] [-c|--(no-)clobber] [-v|--(no-)verbose] [-d|--(no-)debug] <input> <output>
         <input>: Input MINC or NIFTI file
-        <output>: Output MINC file, also used as basename for secondary outputs
+        <output>: Output MINC or NIfTI file (.mnc/.nii/.nii.gz); the extension selects the format. Also used as basename for secondary outputs
         -h, --help: Prints help
         --distance: Initial distance for correction (default: '400')
         --levels: Levels of correction with distance halving (default: '4')
@@ -63,7 +63,21 @@ Usage: ./synthstrip_N3.sh [-h|--help] [--distance <arg>] [--levels <arg>] [--cyc
 
 ## Outputs
 
-Given an output basename `example.mnc` the following BIDS-compliant outputs are created:
+The output format is chosen by the extension of the `<output>` argument: `.mnc`
+(default), `.nii`, or `.nii.gz`. All image-volume outputs (the main image, brain
+masks, tissue segmentation, denoised image, and LSQ6-space volumes) are written in
+that format. Spatial transforms follow suit: in MINC mode they are native MINC
+`.xfm` files plus their referenced deformation grids (`.mnc`); in NIfTI mode they
+are ITK transforms — a `.mat` affine and `1Warp.nii.gz`/`1InverseWarp.nii.gz`
+displacement fields. The `_dseg.tsv` label table and QC images always keep their
+native formats.
+
+> **Note:** registration runs natively in the output format, so a `.mnc` and a
+> `.nii.gz` run of the same subject are independent fits — their transforms differ by
+> sub-voxel noise (~0.04 mm). Within one run everything is consistent. Formats register
+> natively because converting the nonlinear MINC grid to an ITK warp hits a reader bug.
+
+Given an output basename `example.mnc` the following outputs are created:
 
 ```
  example.mnc
