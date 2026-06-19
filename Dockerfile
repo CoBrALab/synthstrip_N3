@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
     bc \
     libjpeg62 \
     imagemagick \
+    parallel \
     perl \
     && apt-get autoremove -y \
     && apt-get clean \
@@ -20,7 +21,7 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
 # Install minc-toolkit 1.9.18
 # URL: https://packages.bic.mni.mcgill.ca/minc-toolkit/Debian/minc-toolkit-1.9.18-20200813-Ubuntu_20.04-x86_64.deb
 # Note: This package was built for Ubuntu 20.04, so we might need to handle dependencies carefully.
-RUN wget -q https://packages.bic.mni.mcgill.ca/minc-toolkit/min/minc-toolkit-1.9.18-20200813-Ubuntu_20.04-x86_64.deb -O /tmp/minc-toolkit.deb \
+RUN wget -q https://packages.bic.mni.mcgill.ca/minc-toolkit/Debian/minc-toolkit-1.9.18-20200813-Ubuntu_20.04-x86_64.deb -O /tmp/minc-toolkit.deb \
     && apt-get update \
     && apt-get install -y /tmp/minc-toolkit.deb \
     && rm /tmp/minc-toolkit.deb \
