@@ -61,8 +61,11 @@ ENV MODELDIR=${QUARANTINE_PATH}/resources/mni_icbm152_nlin_sym_09c_minc2
 
 # The zip stores files at its root, so extract the needed volumes by bare name (flatten
 # with -j). Covers the registration model, brain mask, QC outline, and wm/gm/csf priors.
+COPY sha256checksum.txt /tmp/
 RUN mkdir -p ${MODELDIR} \
-    && wget -q http://www.bic.mni.mcgill.ca/~vfonov/icbm/2009/mni_icbm152_nlin_sym_09c_minc2.zip -O /tmp/m.zip \
+    && wget -q https://www.bic.mni.mcgill.ca/~vfonov/icbm/2009/mni_icbm152_nlin_sym_09c_minc2.zip -O /tmp/m.zip \
+    && cd /tmp/ \
+    && sha256sum -c sha256checksum.txt \
     && unzip -j /tmp/m.zip -d ${MODELDIR} \
          mni_icbm152_t1_tal_nlin_sym_09c.mnc \
          mni_icbm152_t1_tal_nlin_sym_09c_mask.mnc \
