@@ -13,7 +13,6 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
     imagemagick \
     parallel \
     webp \
-    git \
     perl \
     && apt-get autoremove -y \
     && apt-get clean \
@@ -45,13 +44,11 @@ RUN wget -q https://github.com/ANTsX/ANTs/releases/download/v2.6.5/ants-2.6.5-ub
 # /freesurfer/mri_synthstrip; expose it under the expected name (flags are identical).
 RUN ln -s /freesurfer/mri_synthstrip /usr/local/bin/synthstrip
 
-# Install CoBrALab minc-toolkit-extras (provides antsRegistration_affine_SyN.sh, used for
-# the affine/SyN registration to model space). antsRegistration_affine_SyN is a git
-# submodule reached via a top-level symlink, so clone recursively (a plain tarball omits
-# submodule content and the symlink would dangle).
-RUN git clone --depth 1 --recurse-submodules --shallow-submodules \
-    https://github.com/CoBrALab/minc-toolkit-extras.git /opt/minc-toolkit-extras
-ENV PATH="/opt/minc-toolkit-extras:${PATH}"
+# Install CoBrALab antsRegistration_affine_SyN (the affine/SyN registration to model space).
+# Vendored as a git submodule of this repo and copied in; the build context already has the
+# checked-out content, so no network clone is needed here.
+COPY antsRegistration_affine_SyN/ /opt/antsRegistration_affine_SyN/
+ENV PATH="/opt/antsRegistration_affine_SyN:${PATH}"
 
 # MINC compression level
 ENV MINC_COMPRESS=4
