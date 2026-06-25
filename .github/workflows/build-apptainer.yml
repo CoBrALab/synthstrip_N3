@@ -39,7 +39,7 @@ jobs:
             docker://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.release.tag_name }}
 
       - name: Upload Apptainer image to release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: synthstrip-n3_${{ github.event.release.tag_name }}.sif
         env:
