@@ -50,8 +50,18 @@ RUN ln -s /freesurfer/mri_synthstrip /usr/local/bin/synthstrip
 COPY antsRegistration_affine_SyN/ /opt/antsRegistration_affine_SyN/
 ENV PATH="/opt/antsRegistration_affine_SyN:${PATH}"
 
-# MINC compression level
-ENV MINC_COMPRESS=4
+# minc-toolkit environment as image ENV (mirrors minc-toolkit-config.sh) so MINC
+# tools resolve in every execution mode, including non-login/--cleanenv runs.
+ENV MINC_TOOLKIT=/opt/minc/1.9.18 \
+    MINC_TOOLKIT_VERSION="1.9.18-20200813" \
+    PATH=/opt/minc/1.9.18/bin:/opt/minc/1.9.18/pipeline:${PATH} \
+    PERL5LIB=/opt/minc/1.9.18/perl:/opt/minc/1.9.18/pipeline \
+    LD_LIBRARY_PATH=/opt/minc/1.9.18/lib:/opt/minc/1.9.18/lib/InsightToolkit \
+    MNI_DATAPATH=/opt/minc/share:/opt/minc/1.9.18/share \
+    ANTSPATH=/opt/minc/1.9.18/bin \
+    MINC_FORCE_V2=1 \
+    MINC_COMPRESS=4 \
+    VOLUME_CACHE_THRESHOLD=-1
 
 # Bake in the default registration model and tissue priors (mni_icbm152_nlin_sym_09c).
 # The script/configs expect them under ${QUARANTINE_PATH}/resources/... (mirror BIC layout
@@ -83,21 +93,6 @@ RUN chmod +x /usr/local/bin/synthstrip_N3.sh
 # (${__dir}/configs), so they must sit next to synthstrip_N3.sh in /usr/local/bin.
 COPY configs/ /usr/local/bin/configs/
 
-# Make the environment available in interactive debugging shells too.
-# profile.d covers login shells (bash -l); sourcing it from bash.bashrc covers the
-# common non-login interactive case (docker run -it --entrypoint /bin/bash <img>).
-RUN echo 'source /opt/minc/1.9.18/minc-toolkit-config.sh' > /etc/profile.d/minc-toolkit.sh \
-    && chmod 644 /etc/profile.d/minc-toolkit.sh \
-    && echo '. /etc/profile.d/minc-toolkit.sh' >> /etc/bash.bashrc
-
-# Create entrypoint wrapper that sources MINC environment before running the script
-# This ensures proper environment setup in both Docker and Apptainer/Singularity
-# Use bash for compatibility with 'source' command
-RUN echo '#!/bin/bash' > /entrypoint.sh \
-    && echo 'source /opt/minc/1.9.18/minc-toolkit-config.sh' >> /entrypoint.sh \
-    && echo 'exec /usr/local/bin/synthstrip_N3.sh "$@"' >> /entrypoint.sh \
-    && chmod +x /entrypoint.sh
-
-# Set the entrypoint wrapper as the ENTRYPOINT
-ENTRYPOINT ["/entrypoint.sh"]
+# MINC env comes from ENV above, so no sourcing wrapper is needed.
+ENTRYPOINT ["/usr/local/bin/synthstrip_N3.sh"]
 CMD ["--help"]
