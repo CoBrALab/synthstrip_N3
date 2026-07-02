@@ -28,6 +28,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+          persist-credentials: false
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -75,6 +76,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+          persist-credentials: false
 
       - name: Install Apptainer
         run: |
@@ -89,9 +91,11 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build Apptainer image from Docker
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          apptainer build synthstrip-n3_${{ github.event.release.tag_name }}.sif \
-            docker://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.release.tag_name }}
+          apptainer build "synthstrip-n3_${RELEASE_TAG}.sif" \
+            "docker://${REGISTRY}/${IMAGE_NAME}:${RELEASE_TAG}"
 
       - name: Upload Apptainer image to release
         uses: softprops/action-gh-release@v2
