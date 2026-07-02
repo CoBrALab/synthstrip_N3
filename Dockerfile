@@ -97,21 +97,9 @@ RUN chmod +x /usr/local/bin/synthstrip_N3.sh
 # (${__dir}/configs), so they must sit next to synthstrip_N3.sh in /usr/local/bin.
 COPY configs/ /usr/local/bin/configs/
 
-# Make the environment available in interactive debugging shells too.
-# profile.d covers login shells (bash -l); sourcing it from bash.bashrc covers the
-# common non-login interactive case (docker run -it --entrypoint /bin/bash <img>).
-RUN echo 'source /opt/minc/1.9.18/minc-toolkit-config.sh' > /etc/profile.d/minc-toolkit.sh \
-    && chmod 644 /etc/profile.d/minc-toolkit.sh \
-    && echo '. /etc/profile.d/minc-toolkit.sh' >> /etc/bash.bashrc
-
-# Create entrypoint wrapper that sources MINC environment before running the script
-# This ensures proper environment setup in both Docker and Apptainer/Singularity
-# Use bash for compatibility with 'source' command
-RUN echo '#!/bin/bash' > /entrypoint.sh \
-    && echo 'source /opt/minc/1.9.18/minc-toolkit-config.sh' >> /entrypoint.sh \
-    && echo 'exec /usr/local/bin/synthstrip_N3.sh "$@"' >> /entrypoint.sh \
-    && chmod +x /entrypoint.sh
-
-# Set the entrypoint wrapper as the ENTRYPOINT
-ENTRYPOINT ["/entrypoint.sh"]
+# The MINC environment is provided as image-level ENV above, so it is present in
+# every execution mode (login, non-login, interactive, --cleanenv, direct exec).
+# No shell-sourcing (profile.d / bash.bashrc / entrypoint wrapper) is needed --
+# run the pipeline script directly as the entrypoint.
+ENTRYPOINT ["/usr/local/bin/synthstrip_N3.sh"]
 CMD ["--help"]
