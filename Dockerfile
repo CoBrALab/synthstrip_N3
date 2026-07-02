@@ -50,12 +50,8 @@ RUN ln -s /freesurfer/mri_synthstrip /usr/local/bin/synthstrip
 COPY antsRegistration_affine_SyN/ /opt/antsRegistration_affine_SyN/
 ENV PATH="/opt/antsRegistration_affine_SyN:${PATH}"
 
-# Bake the full minc-toolkit environment as image ENV so MINC tools resolve in
-# EVERY execution mode -- not only login/interactive shells or the entrypoint.
-# Pipeline runners (e.g. nipoppy) invoke binaries via non-login, non-interactive
-# `bash -c` under `--cleanenv`, which bypasses /etc/profile.d, /etc/bash.bashrc
-# AND the ENTRYPOINT wrapper; without static ENV the MINC bin/libs are absent
-# (ConvertImage -> exit 127). Values mirror /opt/minc/1.9.18/minc-toolkit-config.sh.
+# minc-toolkit environment as image ENV (mirrors minc-toolkit-config.sh) so MINC
+# tools resolve in every execution mode, including non-login/--cleanenv runs.
 ENV MINC_TOOLKIT=/opt/minc/1.9.18 \
     MINC_TOOLKIT_VERSION="1.9.18-20200813" \
     PATH=/opt/minc/1.9.18/bin:/opt/minc/1.9.18/pipeline:${PATH} \
@@ -97,9 +93,6 @@ RUN chmod +x /usr/local/bin/synthstrip_N3.sh
 # (${__dir}/configs), so they must sit next to synthstrip_N3.sh in /usr/local/bin.
 COPY configs/ /usr/local/bin/configs/
 
-# The MINC environment is provided as image-level ENV above, so it is present in
-# every execution mode (login, non-login, interactive, --cleanenv, direct exec).
-# No shell-sourcing (profile.d / bash.bashrc / entrypoint wrapper) is needed --
-# run the pipeline script directly as the entrypoint.
+# MINC env comes from ENV above, so no sourcing wrapper is needed.
 ENTRYPOINT ["/usr/local/bin/synthstrip_N3.sh"]
 CMD ["--help"]
