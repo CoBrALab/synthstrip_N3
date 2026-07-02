@@ -27,6 +27,28 @@ neuroimaging research:
 - A denoised (via adaptive non-local means) version of the image
 - Quality control images
 
+## Container image
+
+Prebuilt images are published to the GitHub Container Registry at
+`ghcr.io/cobralab/synthstrip_n3`. Tags:
+
+- `latest` — the most recent `master` build
+- `X.Y.Z` / `X.Y` — released versions (from a `vX.Y.Z` git tag / GitHub Release)
+
+Pull and run with Docker:
+
+```bash
+docker run --rm -v "$PWD:/data" ghcr.io/cobralab/synthstrip_n3:latest /data/input.nii /data/output.nii
+```
+
+Or build an Apptainer/Singularity image (also attached as a `.sif` to each
+GitHub Release):
+
+```bash
+apptainer build synthstrip_n3.sif docker://ghcr.io/cobralab/synthstrip_n3:latest
+./synthstrip_n3.sif input.nii output.nii
+```
+
 ## Dependencies
 
 - minc-toolkit-v2 https://bic-mni.github.io/
