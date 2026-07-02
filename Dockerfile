@@ -50,8 +50,22 @@ RUN ln -s /freesurfer/mri_synthstrip /usr/local/bin/synthstrip
 COPY antsRegistration_affine_SyN/ /opt/antsRegistration_affine_SyN/
 ENV PATH="/opt/antsRegistration_affine_SyN:${PATH}"
 
-# MINC compression level
-ENV MINC_COMPRESS=4
+# Bake the full minc-toolkit environment as image ENV so MINC tools resolve in
+# EVERY execution mode -- not only login/interactive shells or the entrypoint.
+# Pipeline runners (e.g. nipoppy) invoke binaries via non-login, non-interactive
+# `bash -c` under `--cleanenv`, which bypasses /etc/profile.d, /etc/bash.bashrc
+# AND the ENTRYPOINT wrapper; without static ENV the MINC bin/libs are absent
+# (ConvertImage -> exit 127). Values mirror /opt/minc/1.9.18/minc-toolkit-config.sh.
+ENV MINC_TOOLKIT=/opt/minc/1.9.18 \
+    MINC_TOOLKIT_VERSION="1.9.18-20200813" \
+    PATH=/opt/minc/1.9.18/bin:/opt/minc/1.9.18/pipeline:${PATH} \
+    PERL5LIB=/opt/minc/1.9.18/perl:/opt/minc/1.9.18/pipeline \
+    LD_LIBRARY_PATH=/opt/minc/1.9.18/lib:/opt/minc/1.9.18/lib/InsightToolkit \
+    MNI_DATAPATH=/opt/minc/share:/opt/minc/1.9.18/share \
+    ANTSPATH=/opt/minc/1.9.18/bin \
+    MINC_FORCE_V2=1 \
+    MINC_COMPRESS=4 \
+    VOLUME_CACHE_THRESHOLD=-1
 
 # Bake in the default registration model and tissue priors (mni_icbm152_nlin_sym_09c).
 # The script/configs expect them under ${QUARANTINE_PATH}/resources/... (mirror BIC layout
